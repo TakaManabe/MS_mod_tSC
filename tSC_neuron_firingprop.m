@@ -37,17 +37,17 @@ hist_res = 15; % number of bins in the phase histogram
 maxburstL = 40; % maximum threshold for intraburst interval (ms)
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-figfold = 'Figures\';
-mkdir([base,figfold]);
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+figfold = 'Figures';
+mkdir(fullfile(base,figfold));
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 Matrixname = 'Matrix';
 
 % Load results Matrix
-if exist([mainPath,Matrixname,'.mat'], 'file')
-    Matrix = load([mainPath,Matrixname]);
+if exist(fullfile(mainPath,[Matrixname,'.mat']), 'file')
+    Matrix = load(fullfile(mainPath,[Matrixname,'.mat']));
     Matrix = Matrix.Matrix;
 else
     Matrix.ID = []; % create Matrix if not exist
@@ -72,13 +72,13 @@ tSC_num = length(mainfreqs);
 
 % Ommit theta cycles during stimulation
 if isstim == 1
-    
+
     if theta_cycles(1,1) < 0 % ommit first theta cycle if the beginning is missing
         theta_cycles(1,:) = [];
         projections(1,:) = [];
     end
-    
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
     theta_phase(stim == 1) = NaN;
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
@@ -86,7 +86,7 @@ if isstim == 1
 end
 
 % Main analysis for each cell
-list = dir([base,'TT','*.mat']); % list cells in the data folder
+list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder
 if nargin < 6
     neuron_num = length(list);
     neuron_n = 1;
@@ -96,11 +96,11 @@ end
 
 for neuron = neuron_n:neuron_num % neuron loop
     ID = list(neuron).name(find(list(neuron).name == '_')-1:find(list(neuron).name == '.') - 1); %cell ID number
-    spikes = cell2mat(struct2cell(load([base,'TT',ID,'.mat']))); % load spike times
-    
+    spikes = cell2mat(struct2cell(load(fullfile(base,['TT',ID,'.mat'])))); % load spike times
+
     % Find bursts and calculate burst properties for each theta cycle
     [burstrate,burstlength,burstduration,skipinx] = burstprop_per_cycle(spikes,maxburstL,theta_cycles,Samplingrate);
-    
+
     tsc_cycles = zeros(1,length(theta_cycles));
     phase_hist = NaN(tSC_num + 2,hist_res);
     mfrate = NaN(1,tSC_num + 2);
@@ -116,36 +116,36 @@ for neuron = neuron_n:neuron_num % neuron loop
     phase_neuron_sum = cell(1,tSC_num + 2);
     figure
     maximize_figure(gcf);
-    
+
     % tSC loop
     for tSC = 1:tSC_num
-        
+
         % Find theta cycles with strong tSC
         p_tSC = projections(:,tSC); %distribution of the projections of the given tSC
         trsh = 2 * median(abs(p_tSC - median(p_tSC))) / 0.6745 + median(p_tSC); %define threshold for strong tSCs
         tsc_dom = find(p_tSC > trsh);
         tsc_cycles(tsc_dom) = 1;
-        
+
         % Calculate mean firing parameters for theta cycles with strong
         % tSC expression
         [phase_hist(tSC,:),mfrate(tSC),stdfrate(tSC),mean_burstlength(tSC),mean_burstduration(tSC),mean_burstrate(tSC),skipratio(tSC),hang(tSC),hmvl(tSC),phase_neuron_sum{tSC},Z(tSC),pRayleigh(tSC)] = firingprop_per_thetatype(tsc_dom,theta_cycles,spikes,Samplingrate,theta_phase,burstlength,burstduration,burstrate,skipinx,hist_res);
-        
+
         % Theta phase histrogramplot
         subplot(4,tSC_num + 1,tSC);
         phase_hist_plot(phase_hist(tSC,:),hist_res,tSC);
         title(sprintf('tsc%0.0f (%0.0f Hz) dominant cycles \n Mean firing rate: %0.2f Hz\n Ratio of skipped cycles: %0.2f \n Mean burstlength: %0.2f spikes\n Mean burstrate: %0.2f Hz',tSC,mainfreqs(tSC),mfrate(tSC),skipratio(tSC),mean_burstlength(tSC),mean_burstrate(tSC)));
     end
-    
+
     % Calculate mean firing parameters for theta cycles without strong
     % tSC expression
     tsc_dom_no = find(tsc_cycles==0);
     [phase_hist(tSC+1,:),mfrate(tSC+1),stdfrate(tSC+1),mean_burstlength(tSC+1),mean_burstduration(tSC+1),mean_burstrate(tSC+1),skipratio(tSC+1),hang(tSC+1),hmvl(tSC+1),phase_neuron_sum{tSC+1},Z(tSC+1),pRayleigh(tSC+1)] = firingprop_per_thetatype(tsc_dom_no,theta_cycles,spikes,Samplingrate,theta_phase,burstlength,burstduration,burstrate,skipinx,hist_res);
-    
+
     % Plot theta-phase histogram for cycles without strong tSC
     subplot(4,tSC_num + 1,tSC_num + 1);
     phase_hist_plot(phase_hist(tSC+1,:),hist_res,tSC+1);
     title(sprintf('Cycles without strong tsc \n Mean firing rate: %0.2f Hz\n Ratio of skipped cycles: %0.2f \n Mean burstlength: %0.2f spikes \n Mean burstrate: %0.2f Hz',mfrate(tSC+1), skipratio(tSC+1),mean_burstlength(tSC+1),mean_burstrate(tSC+1)));
-    
+
     % Plot firing rate bar plot
     subplot(4,tSC_num + 1,(tSC_num + 1) * 2);
     bar(mfrate(1:end - 1));
@@ -156,20 +156,20 @@ for neuron = neuron_n:neuron_num % neuron loop
     set(gca,'xtick',1:tSC_num + 1);
     set(gca,'xticklabel',({'tSC1','tSC2','tSC3','tSC4','tSC5','no tSC'}));
     set(gca,'XTickLabelRotation',45);
-    
+
     % Save figure
-    saveas(gcf, [base, figfold, filename,'_', ID,'firingprop.png']);
-    
+    saveas(gcf, fullfile(base, figfold, [filename,'_', ID,'firingprop.png']));
+
     % Calculate mean firing parameters for all theta cycles
     [phase_hist(tSC+2,:),mfrate(tSC+2),stdfrate(tSC+2),mean_burstlength(tSC+2),mean_burstduration(tSC+2),mean_burstrate(tSC+2),skipratio(tSC+2),hang(tSC+2),hmvl(tSC+2),phase_neuron_sum{tSC+2},Z(tSC+2),pRayleigh(tSC+2)] = firingprop_per_thetatype(1:length(tsc_cycles),theta_cycles,spikes,Samplingrate,theta_phase,burstlength,burstduration,burstrate,skipinx,hist_res);
-    
+
     % Find the current cell
     M_index = find(strcmp({Matrix.ID}, [filename,'_', ID]) == 1);
     if isempty(M_index)
         M_index = length(Matrix) + 1;
         Matrix(M_index).ID = [filename,'_', ID]; % if not yet in the Matrix add
     end
-    
+
     % Add/update results to the Matrix
     Matrix(M_index).frate = mfrate;
     Matrix(M_index).stdfrate = stdfrate;
@@ -183,11 +183,11 @@ for neuron = neuron_n:neuron_num % neuron loop
     Matrix(M_index).pRayleigh = pRayleigh;
     Matrix(M_index).phase_hist = phase_hist;
     Matrix(M_index).phase_neuron = phase_neuron_sum;
-    
+
 end
 
 % Save results
-save([mainPath,Matrixname,'.mat'],'Matrix');
+save(fullfile(mainPath,[Matrixname,'.mat']),'Matrix');
 
 
 function [burstrate,burstlength,burstduration,skipinx] = burstprop_per_cycle(neuron,maxburstL,cycles,samplingrate)
@@ -269,4 +269,4 @@ hold on
 tt = (0:0.1:2*pi) / (2 * pi) * (hist_res + 1);
 plot(tt,cos(tt * (2 * pi) / (hist_res + 1)) * 0.05 + 0.3,'r')
 ylabel('phase coupling')
-        
+

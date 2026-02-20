@@ -3,7 +3,7 @@ function tsc_STA(mainPath, animal, session, ch, isstim, neuron_n)
 %   TSC_STA(MAINPATH,ANIMAL,SESSION,CH,ISSTIM,NEURON_N) performs spike
 %   triggered average analysis on LFP and on the Wavelet power and phase of
 %   the LFP. The analysis is repeated for spikes during theta cycles
-%   expressing different tSCs. 
+%   expressing different tSCs.
 %
 %   Required input arguments:
 %       MAINPATH: the acces route of the folder containing the results
@@ -32,12 +32,12 @@ global Samplingrate; % sampling rate (Hz)
 time_window = 100; % +/- time window size around spikes (ms)
 
 % Define directories
-figfold = 'spiketriggeredfigs\';
-base = [mainPath,animal,'\',session,'\'];
-folder = 'raw\';
+figfold = 'spiketriggeredfigs';
+base = fullfile(mainPath,animal,session);
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
-mkdir([base,'\spiketriggeredfigs'])
+fullpath = fullfile(base,folder,[filename,'_1']);
+mkdir(fullfile(base,figfold))
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -54,11 +54,11 @@ ChLabels = ICA.ChLabels;
 [~,ind] = sort(mainfreqs,'ascend');
 projections(:,:) = projections(:,ind);
 tSC_num = length(mainfreqs);
-stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
 
 % STA analysis for each cell during theta cycles expressing the different
 % tSCs
-list = dir([base,'TT','*.mat']); % list cells in the data folder
+list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder
 if nargin < 6
     neuron_num = length(list);
     neuron_n = 1;
@@ -68,13 +68,13 @@ end
 
 for neuron = neuron_n:neuron_num % neuron loop
     ID = list(neuron).name(find(list(neuron).name == '_')-1:find(list(neuron).name == '.') - 1); %cell ID number
-    spikes = cell2mat(struct2cell(load([base,'TT',ID,'.mat']))); % load spike times
-    
+    spikes = cell2mat(struct2cell(load(fullfile(base,['TT',ID,'.mat'])))); % load spike times
+
     % Omit spikes during stimulation period
     if isstim == 1
         spikes(stim(spikes) == 1) = [];
     end
-    
+
     figure
     for tSC = 1:1:tSC_num + 1 % Loop through tSCs and 'All spikes' at last
         % Find spikes during cycles strongly expressing a tSC
@@ -95,7 +95,7 @@ for neuron = neuron_n:neuron_num % neuron loop
         else % all spikes
             filtered_spikes = spikes;
         end
-        
+
         ETA(filtered_spikes,eeg,Samplingrate,time_window,tSC_num,tSC);
         subplot(3,tSC_num + 1,tSC)
         if tSC == 6
@@ -104,9 +104,9 @@ for neuron = neuron_n:neuron_num % neuron loop
             title(['tSC',int2str(tSC)]);
         end
     end
-    
+
     % Save figure
     maximize_figure(gcf)
-    savefig([base, figfold,'tSC' filename,'_', ID])
+    savefig(fullfile(base, figfold, ['tSC', filename,'_', ID]))
     close all
 end

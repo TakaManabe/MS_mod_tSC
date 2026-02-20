@@ -1,6 +1,6 @@
 function tsc_anesthetized_fig(mainpath)
 %TSC_ANESTHETIZED Main wrapper for the figure 6 presented in the Király
-%   et al. manuscript. 
+%   et al. manuscript.
 %
 %   Required input arguments:
 %       MAINPATH: Fullpath of the database and results matrix
@@ -15,8 +15,8 @@ function tsc_anesthetized_fig(mainpath)
 % spectral components' package by Lopes-dos-Santos et al., 2018.
 
 % load data
-load([mainpath, 'ses_Matrix.mat']);
-load([mainpath, 'Matrix.mat']);
+load(fullfile(mainpath,'ses_Matrix.mat'));
+load(fullfile(mainpath,'Matrix.mat'));
 n_ses = length(ses_Matrix);
 
 % Panel B

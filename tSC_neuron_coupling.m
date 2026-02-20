@@ -34,12 +34,12 @@ kernels = [5,4,3,2,1]; % kernel size for psth smoothing for each tSC from tSC1 t
 time_window = 100; % +/- time window size for rasters around tSCs (ms)
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-figfold = 'Figures\';
-mkdir([base,figfold]);
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+figfold = 'Figures';
+mkdir(fullfile(base,figfold));
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 if isshuffle
     Matrixname = 'Matrix_shuffle';
 else
@@ -47,8 +47,8 @@ else
 end
 
 % Load results Matrix
-if exist([mainPath,Matrixname,'.mat'], 'file')
-    Matrix = load([mainPath,Matrixname]);
+if exist(fullfile(mainPath,[Matrixname,'.mat']), 'file')
+    Matrix = load(fullfile(mainPath,[Matrixname,'.mat']));
     Matrix = Matrix.Matrix;
 else
     Matrix = []; % create Matrix if not exist
@@ -76,13 +76,13 @@ tSC_num = length(mainfreqs);
 
 % Ommit theta cycles during stimulation
 if isstim == 1
-    
+
     if theta_cycles(1,1) < 0 % ommit first theta cycle if the beginning is missing
         theta_cycles(1,:) = [];
         projections(1,:) = [];
     end
-    
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
     theta_phase(stim == 1) = NaN;
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
@@ -90,7 +90,7 @@ if isstim == 1
 end
 
 % Main analysis for each cell
-list = dir([base,'TT','*.mat']); % list cells in the data folder
+list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder
 if nargin < 7
     neuron_num = length(list);
     neuron_n = 1;
@@ -100,8 +100,8 @@ end
 
 for neuron = neuron_n:neuron_num % neuron loop
     ID = list(neuron).name(find(list(neuron).name == '_')-1:find(list(neuron).name == '.') - 1); %cell ID number
-    spikes = cell2mat(struct2cell(load([base,'TT',ID,'.mat']))); % load spike times
-    
+    spikes = cell2mat(struct2cell(load(fullfile(base,['TT',ID,'.mat'])))); % load spike times
+
     % Preallocate space and initialize figure
     tsc_cycles = zeros(1,length(theta_cycles));
     phaserel2tsc = cell(1,tSC_num);
@@ -110,24 +110,24 @@ for neuron = neuron_n:neuron_num % neuron loop
     pRayleigh_Zshift_tsc = NaN(tSC_num,time_window * 2 + 1);
     figure
     maximize_figure(gcf);
-    
+
     % tSC loop
     for tSC = 1:tSC_num
-        
+
         % Find theta cycles with strong tSC
         p_tSC = projections(:,tSC); %distribution of the projections of the given tSC
         trsh = 2 * median(abs(p_tSC - median(p_tSC))) / 0.6745 + median(p_tSC); %define threshold for strong tSCs
         tsc_dom = find(p_tSC > trsh);
         tsc_cycles(tsc_dom) = 1;
-        
+
         % Preallocate space
         raszt = zeros(time_window * 2,length(tsc_dom));
         phaserel2tsc_zshift = cell(1,time_window * 2 + 1);
         phaserel2tsc_2cyc = cell(1);
         sumemd = zeros(length(tsc_dom),time_window * 2 + 1);
-        
+
         for cycinx = 1:length(tsc_dom)
-            
+
             % Find largest tSC trough
             emd_c = median((emdif(:,theta_cycles(tsc_dom(cycinx),2):theta_cycles(tsc_dom(cycinx),end))),2);
             [~,inx] = min(abs(emd_c(2:end) - mainfreqs(tSC)));
@@ -135,13 +135,13 @@ for neuron = neuron_n:neuron_num % neuron loop
             [~,inx2] = min(emd(inx,theta_cycles(tsc_dom(cycinx),2):theta_cycles(tsc_dom(cycinx),end)));
             trig = theta_cycles(tsc_dom(cycinx),2) + inx2 - 1;
             tau_extendedwindow = time_window * 2.5;
-            
+
             % Ommit cycles withouth enough data before or after the tSC trough
             if trig < tau_extendedwindow || length(theta_phase) - trig < tau_extendedwindow
                 continue
             end
-            
-            % Shuffle spikes between theta cycles 
+
+            % Shuffle spikes between theta cycles
             if isshuffle
                 shuffler = randi(length(theta_cycles),1);
                 shift = double(theta_cycles(shuffler,2) - theta_cycles(tsc_dom(cycinx),2));
@@ -149,7 +149,7 @@ for neuron = neuron_n:neuron_num % neuron loop
             else
                 spikes_s = spikes;
             end
-            
+
             raszt(:,cycinx) = histcounts(spikes_s,trig - time_window:trig + time_window);
             % Shift spike with different temporal lags
             try
@@ -161,7 +161,7 @@ for neuron = neuron_n:neuron_num % neuron loop
                 [~,I] = min(abs(valleys - length(wav) / 2));
                 z_phase = z_phase_wholecycle(valleys(I - 1):valleys(I + 1));
                 a_phase = [((z_phase_wholecycle(valleys(I - 2)+ 1:valleys(I - 1))) + pi - 4 * pi),((z_phase_wholecycle(valleys(I - 1)+ 1:valleys(I))) + pi - 2 * pi),((z_phase_wholecycle(valleys(I) + 1:valleys(I + 1))) + pi),((z_phase_wholecycle(valleys(I + 1) + 1:valleys(I + 2))) + pi + 2 * pi)];
-                
+
                 % Get phase values at spike times
                 for tau = -time_window:1:time_window
                     raszt_zshift = histcounts(spikes_s,trig + valleys(I - 1) - tau_extendedwindow - 1 + tau:trig + valleys(I + 1) - tau_extendedwindow - 1 + tau);
@@ -174,13 +174,13 @@ for neuron = neuron_n:neuron_num % neuron loop
             end
             % Average tSC
             sumemd(cycinx,:) = emd(inx,trig - time_window:trig + time_window);
-            
+
         end
-        
+
         % Save phase values for each tSC
         phaserel2tsc{tSC} = phaserel2tsc_2cyc{1};
         phaserel2tsc_Z_t{tSC} = phaserel2tsc_zshift;
-        
+
         % Detect the tSC with the minimal spike-tSC_phase data
         if tSC == 1
             min_spikes = max(cellfun('size',phaserel2tsc_zshift,2));
@@ -188,7 +188,7 @@ for neuron = neuron_n:neuron_num % neuron loop
         if max(cellfun('size',phaserel2tsc_zshift,2)) < min_spikes
             min_spikes = max(cellfun('size',phaserel2tsc_zshift,2));
         end
-        
+
         % Calculate Rayleigh's Z and p for different temporal shifts
         for tau = -time_window:1:time_window
             try
@@ -198,7 +198,7 @@ for neuron = neuron_n:neuron_num % neuron loop
                 pRayleigh_Zshift_tsc(tSC,tau + time_window + 1) = NaN;
             end
         end
-        
+
         % Average tSC
         subplot(3,tSC_num + 1,tSC)
         title(sprintf('tsc%0.0f',tSC));
@@ -208,7 +208,7 @@ for neuron = neuron_n:neuron_num % neuron loop
         set(gca,'xticklabel',({'-100','0','100'}))
         set(gca,'ytick',[])
         ylabel('average tsc')
-        
+
         % tSC triggered raster plots
         Ra=subplot(3,tSC_num + 1,tSC + (tSC_num + 1));
         title('cell firing triggered by the troughs of tSC signals')
@@ -217,7 +217,7 @@ for neuron = neuron_n:neuron_num % neuron loop
         xlim([-time_window,time_window])
         set(gca,'xtick',[-time_window,0,time_window])
         set(gca,'xticklabel',({'-100','0','100'}))
-        
+
         % Psth and Z-shift
         subplot(3,tSC_num + 1,tSC + (tSC_num + 1)*2)
         kernel_time = -kernels(tSC):kernels(tSC);
@@ -231,12 +231,12 @@ for neuron = neuron_n:neuron_num % neuron loop
         hold on
         yyaxis right
         plot(linspace(1,time_window * 2,time_window * 2 + 1),Zshift_tsc(tSC,:))
-        
+
     end
-    
+
     % Save figure
     if ~isshuffle
-        saveas(gcf, [base, figfold, filename,'_', ID,'.png']);
+        saveas(gcf, fullfile(base, figfold, [filename,'_', ID,'.png']));
     end
     % Z-shift p value correction for statistical power differences
     % between tSCs (due to different spike numbers)
@@ -254,7 +254,7 @@ for neuron = neuron_n:neuron_num % neuron loop
             end
         end
     end
-    
+
     % Find the current cell
     if isempty(Matrix)
         Matrix(1).ID = [filename,'_', ID];
@@ -264,16 +264,16 @@ for neuron = neuron_n:neuron_num % neuron loop
         M_index = length(Matrix) + 1;
         Matrix(M_index).ID = [filename,'_', ID]; % if not yet in the Matrix add
     end
-    
+
     % Add/update results to the Matrix
     Matrix(M_index).mainfreqs = mainfreqs;
     Matrix(M_index).Zshift_tsc = Zshift_tsc;
     Matrix(M_index).pRayleigh_Zshift_tsc = pRayleigh_Zshift_tsc;
     Matrix(M_index).phaserel2tsc_A = phaserel2tsc;
     Matrix(M_index).p_rayleigh_corr = p_corr;
-    
+
 end
 
 % Save results
-save([mainPath,Matrixname,'.mat'],'Matrix');
+save(fullfile(mainPath,[Matrixname,'.mat']),'Matrix');
 

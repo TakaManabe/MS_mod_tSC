@@ -52,10 +52,10 @@ elseif strcmp(exp,'anesthetized_rat')
 end
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -76,7 +76,7 @@ tSC_num = length(mainfreqs);
 
 % Ommit theta cycles during stimulation
 if isstim == 1
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
     projections(s_inx,:) = [];
@@ -107,14 +107,14 @@ ratios_shorttheta = ratio_calc(theta_short>theta_long,theta_cycles,tsc_cycles);
 ratios_transition = ratio_calc(theta_long<theta_0_long,theta_cycles,tsc_cycles);
 
 % Load results Matrix
-if exist([mainPath,'ses_Matrix','.mat'], 'file')
-    ses_Matrix = load([mainPath,'ses_Matrix']);
+if exist(fullfile(mainPath,'ses_Matrix.mat'), 'file')
+    ses_Matrix = load(fullfile(mainPath,'ses_Matrix.mat'));
+    ses_Matrix = ses_Matrix.ses_Matrix;
 else
-    ses_Matrix = []; % create Matrix if not exist
+    ses_Matrix = struct('ID',{}); % create Matrix if not exist
 end
 
 % Find the current session
-ses_Matrix = ses_Matrix.ses_Matrix;
 M_index=find(strcmp({ses_Matrix.ID}, filename) == 1);
 if isempty(M_index)
     M_index = length(ses_Matrix) + 1;
@@ -125,7 +125,7 @@ end
 ses_Matrix(M_index).shorttheta = ratios_shorttheta;
 ses_Matrix(M_index).margin_long = ratios_transition;
 ses_Matrix(M_index).longtheta = ratios_longtheta;
-save([mainPath,'ses_Matrix.mat'],'ses_Matrix');
+save(fullfile(mainPath,'ses_Matrix.mat'),'ses_Matrix');
 
 
 % -------------------------------------------------------------------------

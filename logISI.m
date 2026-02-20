@@ -23,27 +23,27 @@ function logISI(mainPath, animal, session, isstim, neuron_n)
 %   19-Dec-2021
 
 % Define directories
-figfold = 'Spectra\';
-base = [mainPath,animal,'\',session,'\'];
+figfold = 'Spectra';
+base = fullfile(mainPath,animal,session);
 filename = [animal,session];
-mkdir([base,figfold])
+mkdir(fullfile(base,figfold))
 Matrixname = 'Matrix';
 
 % Load results Matrix
-if exist([mainPath,Matrixname,'.mat'], 'file')
-    Matrix = load([mainPath,Matrixname]);
+if exist(fullfile(mainPath,[Matrixname,'.mat']), 'file')
+    Matrix = load(fullfile(mainPath,[Matrixname,'.mat']));
 else
-    Matrix = []; % create Matrix if not exist
+    Matrix = struct('Matrix',struct('ID',{})); % create Matrix if not exist
 end
 Matrix = Matrix.Matrix;
 
 % Load stimulation times
 if isstim
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
 end
 
 % Main analysis for each cell
-list = dir([base,'TT','*.mat']); % list cells in the data folder
+list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder
 if nargin < 5
     neuron_num = length(list);
     neuron_n = 1;
@@ -53,13 +53,13 @@ end
 
 for neuron = neuron_n:neuron_num % neuron loop
     ID = list(neuron).name(find(list(neuron).name == '_')-1:find(list(neuron).name == '.') - 1); %cell ID number
-    spikes = cell2mat(struct2cell(load([base,'TT',ID,'.mat']))); % load spike times
-    
+    spikes = cell2mat(struct2cell(load(fullfile(base,['TT',ID,'.mat'])))); % load spike times
+
     % Omit spikes during stimulation period
     if isstim == 1
         spikes(stim(spikes) == 1) = [];
     end
-    
+
     % Plot ISI histogram with logarithmic scale
     figure
     ISI = diff(spikes);
@@ -69,19 +69,19 @@ for neuron = neuron_n:neuron_num % neuron loop
     set(gca,'xscale','log')
     ylabel('Probability')
     xlabel('ISI (ms)')
-    saveas(gcf, [base, figfold, filename,'_', ID,'logISI.png']);
-    
+    saveas(gcf, fullfile(base, figfold, [filename,'_', ID,'logISI.png']));
+
     % Find the current cell in the Matrix
     M_index = find(strcmp({Matrix.ID}, [filename,'_', ID]) == 1);
     if isempty(M_index)
         M_index = length(Matrix) + 1;
         Matrix(M_index).ID = [filename,'_', ID]; % if not yet in the Matrix add
     end
-    
+
     % Add/update results to the Matrix
     Matrix(M_index).isihist = isihist_log_norm;
-    
+
 end
 
 % Save results
-save([mainPath,Matrixname,'.mat'],'Matrix');
+save(fullfile(mainPath,[Matrixname,'.mat']),'Matrix');

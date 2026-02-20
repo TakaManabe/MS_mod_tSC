@@ -1,6 +1,6 @@
 function MS_mod_tSC_main
 %MS_MOD_TSC_MAIN Main wrapper for the figures presented in the Király et
-%al. manuscript. 
+%al. manuscript.
 %   This code is for further analysis after running
 %   TSC_RUN_SESSION_ANALYSES on the sessions of simultaneous septal unit
 %   and hippocampal LFP recordings.
@@ -12,17 +12,36 @@ function MS_mod_tSC_main
 %   update: 07/02/2023
 
 %% Load awake mouse data
-mainpath='L:\Balint\tsc\awake_mouse\';
-load([mainpath, 'ses_Matrix.mat'],'ses_Matrix');
+defaultDataRoot = '/Volumes/T7_Taka/Minnesota/MSHC/Data_VargaV/23798184';
+defaultBrowseRoot = '/Volumes/T7_Taka/Minnesota/MSHC/Data_VargaV';
+dataRoot = defaultDataRoot;
+if ~isfolder(dataRoot)
+    browseRoot = defaultBrowseRoot;
+    if ~isfolder(browseRoot)
+        browseRoot = pwd;
+    end
+    dataRoot = uigetdir(browseRoot,'Select data root folder (23798184)');
+    if isequal(dataRoot,0)
+        error('No data root folder selected.');
+    end
+end
+mainpath = fullfile(dataRoot,'awake_mouse');
+if ~isfolder(mainpath)
+    mainpath = uigetdir(dataRoot,'Select awake_mouse folder');
+    if isequal(mainpath,0)
+        error('No awake_mouse folder selected.');
+    end
+end
+load(fullfile(mainpath,'ses_Matrix.mat'),'ses_Matrix');
 n_ses = length(ses_Matrix);
-load([mainpath, 'Matrix.mat'],'Matrix');
+load(fullfile(mainpath,'Matrix.mat'),'Matrix');
 n = length(Matrix);
 
 % define global variables
 global Colors Samplingrate
 Colors = [[0.2,0.5,1];[0.4,0.8,0.4];[0.5,0,1];[1,0.5,0];[0.5,0.5,0.5];[0,0,0]]; % define tSC colors, and the 'no tSC' color
 Samplingrate = 1000; % sampling rate in Hz
-%% Figure 1 and S1 
+%% Figure 1 and S1
 % Supra-theta spectral components in the MS and the hippocampal CA1
 % radiatum layer of freely moving mice.
 %--------------------------------------------------------------------------
@@ -45,9 +64,9 @@ xlabel('Inter spike interval (ms)')
 % Panel C
 figure
 pow =  vertcat(Matrix.smooth_pow);
-% example spectrum 
+% example spectrum
 cellID=189;
-plot(1:size(pow,2),squeeze(pow(cellID,:))) 
+plot(1:size(pow,2),squeeze(pow(cellID,:)))
 set(gca,'xtick',[4,12,22,35,54,80,169])
 setmyplot_balazs
 ylabel('Normalized power')
@@ -63,7 +82,7 @@ xlabel('Frequency (Hz)')
 % Panel D
 neuron_spectra(mainpath,'20161989','139140','3',1,7);
 
-% Panel E-F 
+% Panel E-F
 % tSCs were extracted in Phyton with the 'Analysis framework for the
 % extraction of theta-nested spectral components' package by
 % Lopes-dos-Santos et al., 2018. Figure were created with the
@@ -152,7 +171,7 @@ pRayleigh_theta = vertcat(Matrix.pRayleigh);
 rythmgroupnum = vertcat(Matrix.rythmgroupnum);
 drift = vertcat(Matrix.drift);
 
-% Normalize firing properties 
+% Normalize firing properties
 frate_norm = tsc_firingprop_norm(frate);
 burstlength_norm = tsc_firingprop_norm(burstlength);
 burstrate_norm = tsc_firingprop_norm(burstrate);
@@ -162,7 +181,7 @@ skipratio_norm = tsc_firingprop_norm(skipratio);
 hang_reltheta = vertcat(Matrix.reltheta_hang);
 phase_hist_align_norm = tSC_phasehist_aligner(Matrix,tSC_num);
 
-% Panel A 
+% Panel A
 tSC_neuron_firingprop(mainpath,'20161695','1824','27',1,9)
 tSC_neuron_firingprop(mainpath,'20161750','5054','15',1,17)
 tSC_neuron_firingprop(mainpath,'20161869','1314','32',1,3)
@@ -189,7 +208,7 @@ titles = {'Phase coupled','Pacemaker','Theta follower','tSC1 activated'};
 for type = 1:4
     % define filters for the different neuron types
     if type == 1
-        filter = pRayleigh_theta(:,end) < 0.01 & frate(:,end) > 3 & (drift == 1);        
+        filter = pRayleigh_theta(:,end) < 0.01 & frate(:,end) > 3 & (drift == 1);
     elseif type == 4
         [~,MX] = max(frate_norm,[],2);
         filter = pRayleigh_theta(:,end) < 0.01 & frate(:,end) > 3 & (drift == 1) & (MX == 1);
@@ -200,8 +219,8 @@ for type = 1:4
     figure
     for tSC=1:tSC_num
         hold on
-        errorshade(1:15,squeeze(mean(phase_hist_align_norm(filter,tSC,:),1))',squeeze(std(phase_hist_align_norm(filter,tSC,:),1)/sqrt(size(phase_hist_align_norm(filter,tSC,:),1)))', 'LineColor',Colors(tSC,:), 'ShadeColor',Colors(tSC,:), 'LineWidth', 3)        
-        %errorshade(1:15,circshift(squeeze(mean(phase_hist_reltheta(filter,tSC,:),2))',-3),circshift(squeeze(std(tSC,phase_hist_reltheta(filter,tSC,:),0,2)/sqrt(size(phase_hist_reltheta(tSC,filter,:),2)))',-3), 'LineColor',Colors(tSC,:), 'ShadeColor',Colors(tSC,:), 'LineWidth', 3) 
+        errorshade(1:15,squeeze(mean(phase_hist_align_norm(filter,tSC,:),1))',squeeze(std(phase_hist_align_norm(filter,tSC,:),1)/sqrt(size(phase_hist_align_norm(filter,tSC,:),1)))', 'LineColor',Colors(tSC,:), 'ShadeColor',Colors(tSC,:), 'LineWidth', 3)
+        %errorshade(1:15,circshift(squeeze(mean(phase_hist_reltheta(filter,tSC,:),2))',-3),circshift(squeeze(std(tSC,phase_hist_reltheta(filter,tSC,:),0,2)/sqrt(size(phase_hist_reltheta(tSC,filter,:),2)))',-3), 'LineColor',Colors(tSC,:), 'ShadeColor',Colors(tSC,:), 'LineWidth', 3)
     end
     setmyplot_balazs;
     title(titles(type));
@@ -231,7 +250,7 @@ title('Preferred theta phase differences tSC1-tSC4 cycles')
 % Fig S2a-e
 figure
 for i = 1:6
-subplot(4,6,i) 
+subplot(4,6,i)
 rose(zeros(1,20))
 hold on
 rose(hang_theta(filter,i),30)
@@ -246,7 +265,7 @@ end
 
 
 for i = 1:5
-subplot(4,6,i+12) 
+subplot(4,6,i+12)
 rose(zeros(1,30))
 hold on
 rose(hang_reltheta(filter,i),20)
@@ -267,7 +286,7 @@ for i = 1:6
         %subplot(5,5,(i-1)*5+j)
         %rose (angdiff(hang_theta(filter,i),hang_theta(filter,j)))
     end
-end 
+end
 subplot(4,2,7)
 imagesc(Sum_Phase_diff_abs)
 setmyplot_balazs
@@ -283,7 +302,7 @@ p = tsc_box_anova(burstrate,burstrate_norm,filter);
 ylabel('Relative strength of theta phase coupling')
 
 % Fig S3 is created with the ms_sync_analysis package by Kocsis et al. 2021
-% (https://github.com/hangyabalazs/ms_sync_analysis) 
+% (https://github.com/hangyabalazs/ms_sync_analysis)
 
 % Fig S4
 figure
@@ -306,30 +325,30 @@ for type = 1:types_num
         ylabel('Relative firing rate')
     end
     title(titles(type));
-    
+
     subplot(5,types_num,types_num + type);
     tsc_box_anova(hmvl_theta,hmvl_theta_norm,filter);
     set(gca,'xtick',[]);
     if type == 1
         ylabel('Relative strength of theta phase coupling')
     end
-    
+
     if rythm_types(type) ~= 2 %skp burst properties for Tonic neurons
-        
+
         subplot(5,types_num,types_num * 2 + type);
         tsc_box_anova(burstrate,burstrate_norm,filter);
         set(gca,'xtick',[]);
         if type == 1
             ylabel('Relative burstrate')
         end
-        
+
         subplot(5,types_num,types_num * 3 + type);
         tsc_box_anova(burstlength,burstlength_norm,filter);
         set(gca,'xtick',[]);
         if type == 1
             ylabel('Relative burstlength')
         end
-        
+
         subplot(5,types_num,types_num * 4 + type);
         tsc_box_anova(skipratio,skipratio_norm,filter);
         if type == 1
@@ -387,12 +406,12 @@ minspikesnum = 10;
 significance_matrix = tSC_coupling_test(Matrix,p_sig,minspikesnum,ones(1,n),tSC_num);
 tSC_Zshift_plot(Matrix,significance_matrix,tSC_num);
 
-% S9 
+% S9
 significance_matrix = tSC_coupling_test(Matrix,p_sig,minspikesnum,rythmgroupnum == 1,tSC_num);
 tSC_Zshift_plot(Matrix,significance_matrix,tSC_num);
 tSC_coupled_neurons_distribution(significance_matrix,tSC_num,pRayleigh_theta,rythmgroupnum);
 
-% S10 
+% S10
 significance_matrix = tSC_coupling_test(Matrix,p_sig,minspikesnum,rythmgroupnum == 13,tSC_num);
 tSC_Zshift_plot(Matrix,significance_matrix,tSC_num);
 tSC_coupled_neurons_distribution(significance_matrix,tSC_num,pRayleigh_theta,rythmgroupnum);
@@ -408,8 +427,8 @@ tSC_coupled_neurons_distribution(significance_matrix,tSC_num,pRayleigh_theta,ryt
 % 2018. S14 demonstrates track reconstruction and built up from micropsopy
 % images.
 
-% 6C,S16A and S16B is created with Cellbase 
-% (https://github.com/hangyabalazs/CellBase) 
+% 6C,S16A and S16B is created with Cellbase
+% (https://github.com/hangyabalazs/CellBase)
 choosecb('tSC_stim')
 load(getpref('cellbase','fname'));
 tsc_interneuron_stim('2391_210112a_1.44');
@@ -428,8 +447,14 @@ set(gca,'xticklabels',{'control','inhibited'})
 ylabel('Ratio of theta cycles expressing strong tSCs')
 
 % S18A
-mainpath = 'L:\Balint\tsc\awake_mouse_control\';
-load([mainpath, 'ses_Matrix.mat'],'ses_Matrix');
+mainpath = fullfile(dataRoot,'awake_mouse_control');
+if ~isfolder(mainpath)
+    mainpath = uigetdir(dataRoot,'Select awake_mouse_control folder');
+    if isequal(mainpath,0)
+        error('No awake_mouse_control folder selected.');
+    end
+end
+load(fullfile(mainpath,'ses_Matrix.mat'),'ses_Matrix');
 noninhib_tsc_ratio =  vertcat(ses_Matrix.noninhib_tsc_ratio);
 inhib_tsc_ratio =  vertcat(ses_Matrix.inhib_tsc_ratio);
 figure
@@ -441,7 +466,13 @@ set(gca,'xticklabels',{'control period','stimulation period (YFP)'})
 ylabel('Ratio of theta cycles expressing strong tSCs')
 
 % S15A
-mainpath = 'L:\Balint\tsc\STIM_Exp';
+mainpath = fullfile(dataRoot,'STIM_Exp');
+if ~isfolder(mainpath)
+    mainpath = uigetdir(dataRoot,'Select STIM_Exp folder');
+    if isequal(mainpath,0)
+        error('No STIM_Exp folder selected.');
+    end
+end
 animal = '2384';
 ch = '86';
 time_window = 200;
@@ -460,7 +491,7 @@ tmS_STA(mainpath, animal, '2', ch, 3, 3, time_window, 4, 2) % tmS 35 Hz control
 tmS_STA(mainpath, animal, '2', ch, 4, 4, time_window, 4, 3) % tmS 54 Hz control
 tmS_STA(mainpath, animal, '3', ch, 1, 4, time_window, 4, 4) % tmS 80 Hz control
 
-% S_Rew_17B 
+% S_Rew_17B
 figure
 tmS_STA(mainpath, animal, '2', ch, 1, 1, time_window, 1, 1) % 8 Hz stim
 
@@ -471,7 +502,7 @@ samplingrate_ap = 20000;
 fr = NaN(1,length(CELLIDLIST));
 p2v = NaN(1,length(CELLIDLIST));
 for neuron = 1:length(CELLIDLIST)
-    [fr(neuron),p2v(neuron)] = get_waveforms(CELLIDLIST(neuron),nchannels,samplingrate_ap,0);    
+    [fr(neuron),p2v(neuron)] = get_waveforms(CELLIDLIST(neuron),nchannels,samplingrate_ap,0);
 end
 scatter(fr,p2v,'.');
 %% Figure 7, S14 -- MS neurons show phase coupling to hippocampal tSCs in
@@ -479,9 +510,21 @@ scatter(fr,p2v,'.');
 %--------------------------------------------------------------------------
 
 % Figure 7
-mainpath='L:\Balint\tsc\anast_rat\';
+mainpath = fullfile(dataRoot,'anast_rat_data_msmodtSC');
+if ~isfolder(mainpath)
+    mainpath = uigetdir(dataRoot,'Select anast_rat_data_msmodtSC folder');
+    if isequal(mainpath,0)
+        error('No anast_rat_data_msmodtSC folder selected.');
+    end
+end
 tsc_anesthetized_fig(mainpath)
 
 % Figure S19
-mainpath='L:\Balint\tsc\anast_mouse\';
+mainpath = fullfile(dataRoot,'anast_mouse_data_msmodtSC');
+if ~isfolder(mainpath)
+    mainpath = uigetdir(dataRoot,'Select anast_mouse_data_msmodtSC folder');
+    if isequal(mainpath,0)
+        error('No anast_mouse_data_msmodtSC folder selected.');
+    end
+end
 tsc_anesthetized_fig(mainpath)

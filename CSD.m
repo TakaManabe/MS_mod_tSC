@@ -7,7 +7,7 @@ function csd = CSD(mainPath, animal, exp, session, chlist)
 %
 %   Required input arguments:
 %       MAINPATH: the acces route of the folder containing the results
-%           matrix and the database: folders with animal IDS containing 
+%           matrix and the database: folders with animal IDS containing
 %           folders with experiment IDS, containing the preprocessed data
 %           (clustered spike times, and extracted tSCs in the \raw folder).
 %       ANIMAL: ID of the animal
@@ -22,11 +22,12 @@ function csd = CSD(mainPath, animal, exp, session, chlist)
 %   30-Oct-2021
 
 % Define directories
-base = [mainPath,animal,'\',exp,'\'];
-folder = 'raw\';
+base = fullfile(mainPath,animal,exp);
+folder = 'raw';
 filename = [animal,exp];
-fullpath = [base,folder,filename,'_',session];
-mkdir([base,folder,'csd\'])
+fullpath = fullfile(base,folder,[filename,'_',session]);
+csd_dir = fullfile(base,folder,'csd');
+mkdir(csd_dir)
 
 % Calculate and save CSD based on the LFP of the prevoius, the curren and
 % the following channel.
@@ -35,6 +36,6 @@ for i=2:length(chlist)-1 %loop through channels except the borders
         [eeg]=cell2mat(struct2cell(load([fullpath,'.eeg.', int2str(chlist(i)),'.mat'])));
         [eegpost]=cell2mat(struct2cell(load([fullpath,'.eeg.', int2str(chlist(i + 1)),'.mat'])));
         csd = -(eegpre - 2 * eeg + eegpost);
-        savepath_csd = [base,folder,'csd\',filename,'_',session,'.eeg.', int2str(chlist(i)),'.mat'];
+        savepath_csd = fullfile(csd_dir,[filename,'_',session,'.eeg.', int2str(chlist(i)),'.mat']);
         save(savepath_csd,'csd','-v7')
 end

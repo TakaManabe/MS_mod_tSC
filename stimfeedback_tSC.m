@@ -32,10 +32,10 @@ function stimfeedback_tSC(mainPath, animal, session, ch)
 global Samplingrate; % in Hz
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -67,7 +67,7 @@ for tSC = 1:1:tSC_num + 1
     end
 end
 
-stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
 [temp] = unifying_and_short_killer(stim, Samplingrate, 3);
 [stim] = unifying_and_short_killer(stim, Samplingrate, 1.5);
 stim(stim==0 & temp==1) = nan;
@@ -81,8 +81,8 @@ noninhib_tsc_ratio = mean(tsc_cycles(ns_inx,:));
 
 
 % Load results Matrix
-if exist([mainPath,'ses_Matrix','.mat'], 'file')
-    ses_Matrix = load([mainPath,'ses_Matrix']);
+if exist(fullfile(mainPath,'ses_Matrix.mat'), 'file')
+    ses_Matrix = load(fullfile(mainPath,'ses_Matrix.mat'));
     ses_Matrix = ses_Matrix.ses_Matrix;
 else
     ses_Matrix(1).ID=filename;; % create Matrix if not exist
@@ -98,4 +98,4 @@ end
 % Save results
 ses_Matrix(M_index).inhib_tsc_ratio = inhib_tsc_ratio;
 ses_Matrix(M_index).noninhib_tsc_ratio = noninhib_tsc_ratio;
-save([mainPath,'ses_Matrix.mat'],'ses_Matrix');
+save(fullfile(mainPath,'ses_Matrix.mat'),'ses_Matrix');

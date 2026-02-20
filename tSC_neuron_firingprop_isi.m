@@ -1,5 +1,5 @@
 function tSC_neuron_firingprop_isi(mainPath, animal, session, ch, isstim, neuron_n)
-%TSC_NEURON_FIRINGPROP_ISI Compare ISI histogram during theta cycles expressing and not expressing tSCs  
+%TSC_NEURON_FIRINGPROP_ISI Compare ISI histogram during theta cycles expressing and not expressing tSCs
 %
 %   Required input arguments:
 %       MAINPATH: the acces route of the folder containing the results
@@ -25,12 +25,12 @@ function tSC_neuron_firingprop_isi(mainPath, animal, session, ch, isstim, neuron
 global Colors
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-figfold = 'Figures\';
-mkdir([base,figfold]);
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+figfold = 'Figures';
+mkdir(fullfile(base,figfold));
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -50,20 +50,20 @@ tSC_num = length(mainfreqs);
 
 % Ommit theta cycles during stimulation
 if isstim == 1
-    
+
     if theta_cycles(1,1) < 0 % ommit first theta cycle if the beginning is missing
         theta_cycles(1,:) = [];
         projections(1,:) = [];
     end
-    
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
     projections(s_inx,:) = [];
 end
 
 % Main analysis for each cell
-list = dir([base,'TT','*.mat']); % list cells in the data folder
+list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder
 if nargin < 6
     neuron_num = length(list);
     neuron_n = 1;
@@ -73,18 +73,18 @@ end
 
 for neuron = neuron_n:neuron_num % neuron loop
     ID = list(neuron).name(find(list(neuron).name == '_')-1:find(list(neuron).name == '.') - 1); %cell ID number
-    spikes = cell2mat(struct2cell(load([base,'TT',ID,'.mat']))); % load spike times
-       
+    spikes = cell2mat(struct2cell(load(fullfile(base,['TT',ID,'.mat'])))); % load spike times
+
     figure
     maximize_figure(gcf);
     tsc_spikes = cell(1,6);
     no_tsc_spikes = cell(1,6);
     ISI_ = cell(1,4);
     ISI_no = cell(1,4);
-    
+
     % tSC loop
     for tSC = 1:4
-        
+
         % Find theta cycles with strong tSC
         p_tSC = projections(:,tSC); %distribution of the projections of the given tSC
         trsh = 2 * median(abs(p_tSC - median(p_tSC))) / 0.6745 + median(p_tSC); %define threshold for strong tSCs
@@ -93,17 +93,17 @@ for neuron = neuron_n:neuron_num % neuron loop
         SP = sort(p_tSC);
         no_tsc_dom = find(p_tSC < SP(length(tsc_dom)));
         tsc_cycles(tsc_dom) = 1;
-        
+
         % Calculate mean firing parameters for theta cycles with strong
         % tSC expression
         for index=1:length(tsc_dom)
             tsc_spikes{tSC} = [tsc_spikes{tSC}; spikes(spikes > theta_cycles(tsc_dom(index),1) & spikes < theta_cycles(tsc_dom(index),6))];
         end
-        
+
         for index=1:length(no_tsc_dom)
             no_tsc_spikes{tSC} = [no_tsc_spikes{tSC}; spikes(spikes > theta_cycles(no_tsc_dom(index),1) & spikes < theta_cycles(no_tsc_dom(index),6))];
         end
-        
+
         subplot(4,tSC_num + 1,tSC)
         ISI_{tSC}= diff(tsc_spikes{tSC});
         ISI_no{tSC}= diff(no_tsc_spikes{tSC});
@@ -113,8 +113,8 @@ for neuron = neuron_n:neuron_num % neuron loop
         set(gca, 'YScale', 'log')
         xlim([0,70])
         setmyplot_balazs
-        line([1/mainfreqs(tSC)*1000,1/mainfreqs(tSC)*1000],[10,300])       
-        
+        line([1/mainfreqs(tSC)*1000,1/mainfreqs(tSC)*1000],[10,300])
+
     end
     % Calculate mean firing parameters for theta cycles without strong
     % tSC expression
@@ -125,18 +125,18 @@ for neuron = neuron_n:neuron_num % neuron loop
     end
 
     ISI_{tSC}= diff(tsc_spikes{tSC});
-    
+
     % Plot theta-phase histogram for cycles without strong tSC
     subplot(4,tSC_num + 1,tSC_num + 1);
-      
+
     % Plot firing rate bar plot
     subplot(4,tSC_num + 1,(tSC_num + 1));
     histogram(ISI_{6},0:1:70,'Normalization', 'probability')
     xlim([0,70])
-    
+
     % Save figure
-    saveas(gcf, [base, figfold, filename,'_', ID,'firingprop_burst_abs.pdf']);
-           
+    saveas(gcf, fullfile(base, figfold, [filename,'_', ID,'firingprop_burst_abs.pdf']));
+
 end
 
 
@@ -145,4 +145,4 @@ end
 
 
 
-        
+

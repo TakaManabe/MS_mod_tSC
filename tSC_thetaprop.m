@@ -25,10 +25,10 @@ function tSC_thetaprop(mainPath, animal, session, ch, isstim, isrun)
 
 
 % Define directories
-base = [mainPath,animal,'\',session,'\'];
-folder = 'raw\';
+base = fullfile(mainPath,animal,session);
+folder = 'raw';
 filename = [animal,session];
-fullpath = [base,folder,filename,'_1'];
+fullpath = fullfile(base,folder,[filename,'_1']);
 
 % Load extracted theta cycles
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -54,7 +54,7 @@ if isstim == 1
         theta_cycles(1,:) = [];
         projections(1,:) = [];
     end
-    stim = cell2mat(struct2cell(load([mainPath,'\STIMULATIONS\',filename,'.mat'],'stim')));
+    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
     projections(s_inx,:) = [];
@@ -63,7 +63,7 @@ end
 
 % Load speed data
 if isrun
-    load([base,'Position.mat'])
+    load(fullfile(base,'Position.mat'))
     tt = POS.t;
     vv = POS.speed;
     t = [tt{1} / 20 ; tt{2} / 20 + L1];
@@ -92,7 +92,7 @@ for cyc_inx = 1:length(theta_cycles)
 end
 
 for tSC = 1:1:tSC_num + 1
-    
+
     if tSC <= tSC_num
         % Find theta cycles with strong tSC
         p_tSC = projections(:,tSC); % distribution of the projections of the given tSC
@@ -103,7 +103,7 @@ for tSC = 1:1:tSC_num + 1
         tsc_dom = find(sum(tsc_cycles,2) == 0);
         tsc_cycles(tsc_dom,tSC) = 1;
     end
-    
+
     numberofcycles(tSC) = length(tsc_dom);
     avg_cycle_length(tSC) = mean(theta_cycles(tsc_dom,5) - theta_cycles(tsc_dom,1));
     avg_cycle_amp(tSC) = mean(theta_amp(tsc_dom));
@@ -111,8 +111,8 @@ for tSC = 1:1:tSC_num + 1
 end
 
 % Load results Matrix
-if exist([mainPath,'ses_Matrix','.mat'], 'file')
-    ses_Matrix = load([mainPath,'ses_Matrix']);
+if exist(fullfile(mainPath,'ses_Matrix.mat'), 'file')
+    ses_Matrix = load(fullfile(mainPath,'ses_Matrix.mat'));
     ses_Matrix = ses_Matrix.ses_Matrix;
 else
     ses_Matrix = []; % create Matrix if not exist
@@ -142,4 +142,4 @@ ses_Matrix(M_index).cycle_amplitudo_all = theta_amp;
 ses_Matrix(M_index).avg_cycle_amplitudo = avg_cycle_amp;
 ses_Matrix(M_index).avg_allcycle_amplitudo = mean(theta_amp);
 
-save([mainPath,'ses_Matrix.mat'],'ses_Matrix');
+save(fullfile(mainPath,'ses_Matrix.mat'),'ses_Matrix');

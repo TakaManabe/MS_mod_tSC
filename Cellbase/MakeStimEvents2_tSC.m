@@ -4,13 +4,13 @@ function MakeStimEvents2_tSC(sessionpath,ppch,varargin)
 %   structure ('StimEvents') for the stimulation session in the folder
 %   SESSIONPATH. Stimulation pulses are detected as TTLs recorded by the
 %   data acquisition system on channel PPCH and their number is verified
-%   by the log file of the stimulation control software. 
+%   by the log file of the stimulation control software.
 
 %   Modified from MakeStimEvents
 %   Bálint Király
 %   Institute of Experimental Medicine, Budapest, Hungary
 %   kiraly.balint@koki.hu
-%   24-Dec-2021  
+%   24-Dec-2021
 
 BurstSeparation = 0.5;
 
@@ -21,10 +21,10 @@ end
 cd(sessionpath)
 
 % Load Open Ephys events
-start=readNPY([sessionpath 'timestamps' '.npy']);
-timestamps1=double((readNPY([sessionpath 'timestamps_stim', '.npy']))- start(1))/20000;
-data1=double((readNPY([sessionpath '\' 'channels', '.npy'])));
-info1.eventId=double((readNPY([sessionpath '\' 'channel_states', '.npy'])));
+start=readNPY(fullfile(sessionpath,'timestamps.npy'));
+timestamps1=double((readNPY(fullfile(sessionpath,'timestamps_stim.npy')))- start(1))/20000;
+data1=double((readNPY(fullfile(sessionpath,'channels.npy'))));
+info1.eventId=double((readNPY(fullfile(sessionpath,'channel_states.npy'))));
 % PulsePal TTL onset and offsets
 timestamps = timestamps1';
 ppinx = data1==ppch;
@@ -135,4 +135,4 @@ for currentEvent = 1:nvalid_pulses
 end
 
 % Save
-save([sessionpath '\' 'StimEvents.mat'],'-struct','SE'); %Save OE timestamps into a .mat file
+save(fullfile(sessionpath,'StimEvents.mat'),'-struct','SE'); %Save OE timestamps into a .mat file

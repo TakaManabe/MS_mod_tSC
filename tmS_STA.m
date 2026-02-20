@@ -2,7 +2,7 @@ function tmS_STA(mainPath, animal, session, ch, stimepoch, burstlength, time_win
 %TMS_STA Triggered average analysis for theta modulated stimulation bursts
 %   TMS_STA(MAINPATH,ANIMAL,SESSION,CH,STIMEPOCH,BURSTLENGTH,TIME_WINDOW,COLUMNSNUM,COLUMN)
 %   performs stimulus triggered average analysis on LFP and on the Wavelet
-%   power and phase of the LFP. 
+%   power and phase of the LFP.
 %
 %   Required input arguments:
 %       MAINPATH: the acces route of the folder containing the database:
@@ -13,7 +13,7 @@ function tmS_STA(mainPath, animal, session, ch, stimepoch, burstlength, time_win
 %       CH: number of the LFP channel
 %       STIMEPOCH: which stimulation epoch to examine within the session
 %       BURSTLENGTH: number of stimulies in a stimulation burst
-%       TIME_WINDOW: % +/- size of the time window around events (ms) 
+%       TIME_WINDOW: % +/- size of the time window around events (ms)
 %       COLUMNSNUM: number of columns plotted
 %       COLUMN: number of the current column
 
@@ -26,13 +26,13 @@ function tmS_STA(mainPath, animal, session, ch, stimepoch, burstlength, time_win
 
 global Samplingrate
 
-base = [mainPath,'\',animal,'\',animal,'_',session,'\raw\'];
+base = fullfile(mainPath,animal,[animal,'_',session],'raw');
 filename = [animal,'_',session];
 
-eeg = cell2mat(struct2cell(load([base,filename,'.eeg.', ch ,'.mat'])));
+eeg = cell2mat(struct2cell(load(fullfile(base,[filename,'.eeg.', ch ,'.mat']))));
 
-[~,t]=load_open_ephys_data([base, '100_CH' '1' '.continuous']);
-[~,stimt]=load_open_ephys_data([base, 'all_channels.events']);
+[~,t]=load_open_ephys_data(fullfile(base,'100_CH1.continuous'));
+[~,stimt]=load_open_ephys_data(fullfile(base,'all_channels.events'));
 %timestamps=readNPY([mainpath,'timestamps', '.npy']);
 %stims=(readNPY([mainpath,'timestamps_stim', '.npy'])-timestamps(1))/20;
 

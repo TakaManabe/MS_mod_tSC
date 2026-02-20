@@ -1,5 +1,5 @@
 function Z_decr = tSC_coupling_shufflingcontroll(mainpath,p_sig,minspikesnum,tSC_num)
-%TSC_COUPLING_SHUFFLINGCONTROLL Shuffling controll of tSC coupling. 
+%TSC_COUPLING_SHUFFLINGCONTROLL Shuffling controll of tSC coupling.
 %   Z_DECR = TSC_COUPLING_SHUFFLINGCONTROLL[MAINPATH,P_SZIG,MINSPIKESNUM,TSC_NUM]
 %   Compares tSC coupling of real spikes vs shuffled spikes at P_SIG
 %   significance level at any of the temporal shifts pretested with the
@@ -8,7 +8,7 @@ function Z_decr = tSC_coupling_shufflingcontroll(mainpath,p_sig,minspikesnum,tSC
 %   non coupled. TSC_NUM defines the number of tSC required to be tested.
 %   The Figure S6 of the Király et al. manuscript and he number of
 %   neurons with decreased maximal Rayleigh's Z is returned for each tSC
-%   (Z_DECR). 
+%   (Z_DECR).
 %
 %   See also TSC_NEURON_COUPLING
 
@@ -19,8 +19,8 @@ function Z_decr = tSC_coupling_shufflingcontroll(mainpath,p_sig,minspikesnum,tSC
 
 
 % Load preprocessed non-shuffled and shuffled coupling data
-load([mainpath, 'Matrix.mat'],'Matrix');
-Matrix_shuffle = load([mainpath,'Matrix_shuffle.mat'],'Matrix');
+load(fullfile(mainpath,'Matrix.mat'),'Matrix');
+Matrix_shuffle = load(fullfile(mainpath,'Matrix_shuffle.mat'),'Matrix');
 Matrix_shuffle = Matrix_shuffle.Matrix;
 n = length(Matrix);
 % Find significcant tSC coupling for non-shuffled and shuffled spikes
@@ -44,7 +44,7 @@ for tSC = 1:tSC_num
     subplot(1,tSC_num,tSC)
     line([1,2],[squeeze(Z_max(significance_matrix(tSC,:) == 1,tSC)),squeeze(Z_max_shuffle(significance_matrix(tSC,:) == 1,tSC))],'Color',[0,0,0,0.05])
     Z_decr(tSC) = sum(Z_max(significance_matrix(tSC,:) == 1,tSC) < Z_max_shuffle(significance_matrix(tSC,:) == 1,tSC));
-    line([1,2],[mean(squeeze(Z_max(significance_matrix(tSC,:) == 1,tSC))),mean(squeeze(Z_max_shuffle(significance_matrix(tSC,:) == 1,tSC)))],'Color',[0,0,0])    
+    line([1,2],[mean(squeeze(Z_max(significance_matrix(tSC,:) == 1,tSC))),mean(squeeze(Z_max_shuffle(significance_matrix(tSC,:) == 1,tSC)))],'Color',[0,0,0])
     xlim([0,3])
 end
 

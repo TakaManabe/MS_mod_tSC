@@ -22,9 +22,34 @@ global CGWINDOW
 global NSR
 
 clear all
-load('D:\FREE_MOUSE\analysis\26012021_tsc\parameters.mat');
+defaultDataRoot = '/Volumes/T7_Taka/Minnesota/MSHC/Data_VargaV/23798184';
+defaultBrowseRoot = '/Volumes/T7_Taka/Minnesota/MSHC/Data_VargaV';
+dataRoot = defaultDataRoot;
+if ~isfolder(dataRoot)
+    browseRoot = defaultBrowseRoot;
+    if ~isfolder(browseRoot)
+        browseRoot = pwd;
+    end
+    dataRoot = uigetdir(browseRoot,'Select data root folder (23798184)');
+    if isequal(dataRoot,0)
+        error('No data root folder selected.');
+    end
+end
+paramFile = fullfile(dataRoot,'parameters.mat');
+if exist(paramFile,'file')
+    load(paramFile);
+else
+    [paramName,paramDir] = uigetfile('*.mat','Select parameters.mat',dataRoot);
+    if isequal(paramName,0)
+        error('No parameters file selected.');
+    end
+    load(fullfile(paramDir,paramName));
+end
 
-savePath = 'C:\Users\Barni\ONE_DRIVE\kutatas\KOKI\tsc';
+savePath = uigetdir(dataRoot,'Select folder for saving outputs');
+if isequal(savePath,0)
+    savePath = dataRoot;
+end
 
 grpId = 'pacemakers';
 ID = {20161989,151152,2,9};
