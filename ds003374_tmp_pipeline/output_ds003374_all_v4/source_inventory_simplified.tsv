@@ -1,0 +1,14 @@
+subject	session	source_key	source_uuid	source_name	macro_label	anatomy	soz	anatomy_simple
+sub-01	ses-01	iEEG electrode 1	0a21e0b8-794c-421e-bac5-9ed68d1a40e7	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala lAmyg, lateral amygdala		Amygdala|L|lateral|code=lAmyg
+sub-01	ses-01	iEEG electrode 2	93853090-57f4-4f0d-9826-2fa255f2e8ee	iEEG electrode 2	mAR2-mAR1	Hipp, Right Hippocampus rHipp, rostral hippocampus		Hippocampus|R|rostral|code=rHipp
+sub-02	ses-01	iEEG electrode 1	ea27fa69-6e0a-46ef-bfc9-35ba2b90d081	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala		Amygdala|L|medial|code=mAmyg
+sub-02	ses-01	iEEG electrode 2	ee334a46-84b2-4c87-8768-e2145a447fca	iEEG electrode 2	mAR2-mAR1	Amyg, Right Amygdala mAmyg, medial amygdala		Amygdala|R|medial|code=mAmyg
+sub-03	ses-01	iEEG electrode 1	7b95f549-0761-4589-af6f-991c304eddb6	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala		Amygdala|L|medial|code=mAmyg
+sub-04	ses-01	iEEG electrode 1	8a23cb60-cf95-4efe-904f-7d1f97ef9614	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala		Amygdala|L|medial|code=mAmyg
+sub-06	ses-01	iEEG electrode 1	204c9fc2-3c5b-4181-88bb-777ad77978cf	iEEG electrode 1	mAL2-mAL1			
+sub-06	ses-01	iEEG electrode 2	5ce076c8-e9ab-45a5-9a61-bb3827c8b558	iEEG electrode 2	mAR2-mAR1			
+sub-07	ses-01	iEEG electrode 1	97277b44-2e7d-41f9-8872-9bd65491ee0c	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala lAmyg, lateral amygdala		Amygdala|L|lateral|code=lAmyg
+sub-07	ses-01	iEEG electrode 2	620121e6-e28b-43a8-a637-14e667439e54	iEEG electrode 2	mAR2-mAR1	Amyg, Right Amygdala mAmyg, medial amygdala		Amygdala|R|medial|code=mAmyg
+sub-08	ses-01	iEEG electrode 1	1b743a4a-fd4c-4113-9691-de4d325ccdb1	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala		Amygdala|L|medial|code=mAmyg
+sub-09	ses-01	iEEG electrode 1	3d037258-9406-4d7a-a200-121f1e987eef	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala		Amygdala|L|medial|code=mAmyg
+sub-09	ses-01	iEEG electrode 2	5a60a3ff-bffc-415c-8329-9eee0a0e471a	iEEG electrode 2	mAR2-mAR1	Hipp, Right Hippocampus rHipp, rostral hippocampus		Hippocampus|R|rostral|code=rHipp

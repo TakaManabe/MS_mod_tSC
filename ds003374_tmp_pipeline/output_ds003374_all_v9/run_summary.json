@@ -1,0 +1,54 @@
+{
+  "ds_root": "/Users/takamanabe/Documents/Git/ds003374",
+  "nix_dir": "/Users/takamanabe/Documents/Git/ds003374/bidsignore/data_NIX",
+  "n_subject_pages": 8,
+  "subjects": [
+    "sub-01",
+    "sub-02",
+    "sub-03",
+    "sub-04",
+    "sub-06",
+    "sub-07",
+    "sub-08",
+    "sub-09"
+  ],
+  "outputs": {
+    "subject_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_all_v9/subject_inventory.tsv",
+    "unit_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_all_v9/unit_inventory.tsv",
+    "source_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_all_v9/source_inventory.tsv",
+    "index_html": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_all_v9/index.html"
+  },
+  "params": {
+    "trial_gap_sec": 0.0,
+    "MS_LFP_OVERLAY": true,
+    "MS_LFP_SIGMA": 0.004,
+    "MS_LFP_A": 0.2,
+    "MS_LFP_A0": 1.0,
+    "MS_LFP_D_DEFAULT": 3.0,
+    "MS_LFP_POST_SMOOTH_SEC": 0.012,
+    "APPLY_MACRO_LINE_NOISE": true,
+    "MACRO_LINE_NOISE_Q": 30.0,
+    "APPLY_ZSCORE": true,
+    "POWER_TIME_THETA_BANDS": [
+      "1-4",
+      "4-6",
+      "4-8",
+      "4-10",
+      "4-12",
+      "6-8",
+      "6-10",
+      "6-12",
+      "8-10",
+      "8-12",
+      "10-12"
+    ],
+    "POWER_TIME_TF_WIN_SEC": 10.0,
+    "POWER_TIME_TF_STEP_SEC": 1.0,
+    "POWER_TIME_APPLY_DB": false,
+    "POWER_TIME_DB_EPS": 1.1920928955078125e-07,
+    "POWER_TIME_SMOOTH_WIN_SEC": 10.0,
+    "interactive_max_points": 20000,
+    "plotly_js": "cdn",
+    "anatomy_substring": "amyg"
+  }
+}

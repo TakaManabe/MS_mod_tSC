@@ -52,10 +52,8 @@ elseif strcmp(exp,'anesthetized_rat')
 end
 
 % Define directories
-base = fullfile(mainPath,animal,session);
-folder = 'raw';
 filename = [animal,session];
-fullpath = fullfile(base,folder,[filename,'_1']);
+[fullpath, base] = resolve_session_fullpath(mainPath, animal, session, ch);
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -76,7 +74,7 @@ tSC_num = length(mainfreqs);
 
 % Ommit theta cycles during stimulation
 if isstim == 1
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
     projections(s_inx,:) = [];

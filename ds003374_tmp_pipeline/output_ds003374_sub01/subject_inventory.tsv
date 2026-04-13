@@ -1,0 +1,2 @@
+subject	session	nix_file	trial_count	fs_hz	lfp_channel_count	lfp_channels	n_mapped_units	mapped_units	bids_channels_tsv	bids_electrodes_tsv	bids_channel_count	bids_electrode_count	bids_channel_groups	bids_channel_names	plot_html
+sub-01	ses-01	Data_Subject_01_Session_01.h5	17	2000.0	2	mAL2-mAL1,mAR2-mAR1	4	T1_1,T1_2,T1_3,T2_1	sub-01_ses-01_task-jokeit_run-01_channels.tsv	sub-01_ses-01_space-MNI152_electrodes.tsv	4	4	depthAmgL,depthAmgR	mAL1,mAL2,mAR1,mAR2	sub-01_ses-01_signal_pseudo_lfp.html

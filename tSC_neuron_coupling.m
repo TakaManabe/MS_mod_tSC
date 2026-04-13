@@ -34,12 +34,10 @@ kernels = [5,4,3,2,1]; % kernel size for psth smoothing for each tSC from tSC1 t
 time_window = 100; % +/- time window size for rasters around tSCs (ms)
 
 % Define directories
-base = fullfile(mainPath,animal,session);
 figfold = 'Figures';
-mkdir(fullfile(base,figfold));
-folder = 'raw';
 filename = [animal,session];
-fullpath = fullfile(base,folder,[filename,'_1']);
+[fullpath, base] = resolve_session_fullpath(mainPath, animal, session, ch);
+mkdir(fullfile(base,figfold));
 if isshuffle
     Matrixname = 'Matrix_shuffle';
 else
@@ -82,7 +80,7 @@ if isstim == 1
         projections(1,:) = [];
     end
 
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
     theta_phase(stim == 1) = NaN;
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];

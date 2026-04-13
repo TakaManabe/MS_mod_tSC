@@ -1,0 +1,3 @@
+subject	session	source_key	source_uuid	source_name	macro_label	anatomy	soz
+sub-02	ses-01	iEEG electrode 1	ea27fa69-6e0a-46ef-bfc9-35ba2b90d081	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	
+sub-02	ses-01	iEEG electrode 2	ee334a46-84b2-4c87-8768-e2145a447fca	iEEG electrode 2	mAR2-mAR1	Amyg, Right Amygdala mAmyg, medial amygdala	

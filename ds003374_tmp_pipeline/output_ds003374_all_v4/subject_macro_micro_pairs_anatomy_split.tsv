@@ -1,0 +1,14 @@
+subject	session	macro_channel	paired	n_micro_units	structure	hemisphere	subregion	code
+sub-01	ses-01	mAL2-mAL1	yes	3	Amygdala	L	lateral	lAmyg
+sub-01	ses-01	mAR2-mAR1	no	0	Hippocampus	R	rostral	rHipp
+sub-02	ses-01	mAL2-mAL1	yes	3	Amygdala	L	medial	mAmyg
+sub-02	ses-01	mAR2-mAR1	yes	9	Amygdala	R	medial	mAmyg
+sub-03	ses-01	mAL2-mAL1	yes	3	Amygdala	L	medial	mAmyg
+sub-04	ses-01	mAL2-mAL1	yes	7	Amygdala	L	medial	mAmyg
+sub-06	ses-01	mAL2-mAL1	no	0				
+sub-06	ses-01	mAR2-mAR1	no	0				
+sub-07	ses-01	mAL2-mAL1	yes	9	Amygdala	L	lateral	lAmyg
+sub-07	ses-01	mAR2-mAR1	yes	7	Amygdala	R	medial	mAmyg
+sub-08	ses-01	mAL2-mAL1	no	0	Amygdala	L	medial	mAmyg
+sub-09	ses-01	mAL2-mAL1	no	0	Amygdala	L	medial	mAmyg
+sub-09	ses-01	mAR2-mAR1	no	0	Hippocampus	R	rostral	rHipp

@@ -37,12 +37,10 @@ hist_res = 15; % number of bins in the phase histogram
 maxburstL = 40; % maximum threshold for intraburst interval (ms)
 
 % Define directories
-base = fullfile(mainPath,animal,session);
 figfold = 'Figures';
-mkdir(fullfile(base,figfold));
-folder = 'raw';
 filename = [animal,session];
-fullpath = fullfile(base,folder,[filename,'_1']);
+[fullpath, base] = resolve_session_fullpath(mainPath, animal, session, ch);
+mkdir(fullfile(base,figfold));
 Matrixname = 'Matrix';
 
 % Load results Matrix
@@ -78,7 +76,7 @@ if isstim == 1
         projections(1,:) = [];
     end
 
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
     theta_phase(stim == 1) = NaN;
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];

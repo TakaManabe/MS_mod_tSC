@@ -31,10 +31,8 @@ time_window = 100;
 
 % Define directories
 figfold = 'Spectra';
-base = fullfile(mainPath,animal,session);
-folder = 'raw';
 filename = [animal,session];
-fullpath = fullfile(base,folder,[filename,'_1']);
+[fullpath, base] = resolve_session_fullpath(mainPath, animal, session, ch);
 mkdir(fullfile(base,figfold))
 Matrixname = 'Matrix';
 
@@ -49,7 +47,7 @@ Matrix = Matrix.Matrix;
 % Load LFP and stimulation times
 eeg = cell2mat(struct2cell(load([fullpath,'.eeg.', ch ,'.mat'])));
 if isstim
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
 end
 % Main analysis for each cell
 list = dir(fullfile(base,'TT*.mat')); % list cells in the data folder

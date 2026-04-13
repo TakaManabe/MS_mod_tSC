@@ -1,44 +1,51 @@
-# MATLAB code for 'The medial septum controls hippocampal supra-theta oscillations'
+# 『The medial septum controls hippocampal supra-theta oscillations』のための MATLAB code
 
-## Description
+## 概要
 
-This repository contains MATLAB code for data analysis on the connection between theta-nested spectral components (tSCs), single unit activities and optogenetic stimulus events. Single unit clusters and hippocampal tSCs were extracted with Kilosort (https://github.com/MouseLand/Kilosort) and the tSC extraction package (https://data.mrc.ox.ac.uk/data-set/tsc).
+この repository には、theta-nested spectral components (tSCs)、single unit activity、optogenetic stimulus events の関係を解析するための MATLAB code が含まれています。single unit cluster と hippocampal tSCs は、Kilosort (https://github.com/MouseLand/Kilosort) と tSC extraction package (https://data.mrc.ox.ac.uk/data-set/tsc) を用いて抽出されています。
 
-The figures and supplementary figures of 'The medial septum modulates hippocampal oscillations beyond the theta rhythm' by Király et al. can be produced with the MS_mod_tSC_main function relying on four datasets:
-- freely moving mouse (hippocampal LFP - septal units) 
+Király et al. による『The medial septum modulates hippocampal oscillations beyond the theta rhythm』の figure および supplementary figure は、以下 4 つの dataset に基づいて、MS_mod_tSC_main function で再現できます。
+- freely moving mouse (hippocampal LFP - septal units)
 - anesthetized rat (hippocampal LFP - septal units)
 - anesthetized mouse (hippocampal LFP - septal units)
-- optogenetic stimulation of PV experessing septal neurons in mice (hippocampal LFP, hippocampal units - septal stimulus events)
+- mice における PV expressing septal neurons の optogenetic stimulation (hippocampal LFP, hippocampal units - septal stimulus events)
 
-Demo session data, showing the required data format and hierarchy, is avaibale at the following link: https://figshare.com/articles/dataset/Demo_data_for_the_MATLAB_code_for_analyzing_the_connection_between_the_medial_septum_and_hippocampal_oscillations_beyond_the_theta_rhythm_/22060964
-(content: raw downsampled lfp; position data of the animal (optional); stimulation times (optional); preprocessed data after spike sorting and tSC extraction)
-(e.g. tSC_run_session_analyses ('L:\Balint\tsc\awake_mouse\','20161989','107108','10',1,1,'awake_mouse') for the demo session, see code documentation for further details on the inputs)
+必要な data format と hierarchy を示した demo session data は、以下の link から利用できます。  
+https://figshare.com/articles/dataset/Demo_data_for_the_MATLAB_code_for_analyzing_the_connection_between_the_medial_septum_and_hippocampal_oscillations_beyond_the_theta_rhythm_/22060964
 
-Session data can be preprocessed with the tSC_run_session_analyses function. Preprocessed data is stored in the Matrix.mat and ses_Matrix.mat files in the root directory.
+(content: raw downsampled lfp、動物の position data (optional)、stimulation times (optional)、spike sorting と tSC extraction 後の preprocessed data)  
+(例: demo session に対して `tSC_run_session_analyses ('L:\Balint\tsc\awake_mouse\','20161989','107108','10',1,1,'awake_mouse')`。input の詳細は code documentation を参照)
 
-## Content
+Session data は `tSC_run_session_analyses` function で preprocessing できます。preprocessed data は root directory の `Matrix.mat` と `ses_Matrix.mat` に保存されます。
 
-- .m files for data analysis
+## 内容
+
+- data analysis 用の `.m` file
 - license file
 
-## Installation
+## インストール
 
-Move the .m files on your MATLAB path (should take around a few seconds). No further installation is needed. 
+`.m` file を MATLAB path に追加してください（数秒程度）。追加の installation は不要です。
 
-## Dependencies
+## 依存関係
 
-This code uses functions from the hangya-matlab-code package for spike triggered average analyses (https://github.com/hangyabalazs/Hangya-Matlab-code).
+この code は、spike triggered average analysis のために hangya-matlab-code package の function を使用します。  
+https://github.com/hangyabalazs/Hangya-Matlab-code
 
-Classification of MS neurons based on their rhythmicity was performed with the ms_sync_analysis package (https://github.com/hangyabalazs/ms_sync_analysis). 
+rhythmicity に基づく MS neuron の classification には、ms_sync_analysis package を使用しています。  
+https://github.com/hangyabalazs/ms_sync_analysis
 
-Optogenetically stimulated hippocampal neurons were examined using Cellbase (https://github.com/hangyabalazs/CellBase). Note that when running the first time, Cellbase needs to be initialized first.
+optogenetically stimulated hippocampal neuron の解析には Cellbase を使用しています。初回実行時は、まず Cellbase の initialization が必要です。  
+https://github.com/hangyabalazs/CellBase
 
-Not ordinary data formats are loaded with the (https://github.com/kwikteam/npy-matlab/blob/master/npy-matlab/readNPY.m) and the (https://github.com/open-ephys/analysis-tools/blob/master/load_open_ephys_data.m) functions.
+通常ではない data format の読み込みには、以下の function を使用しています。  
+https://github.com/kwikteam/npy-matlab/blob/master/npy-matlab/readNPY.m  
+https://github.com/open-ephys/analysis-tools/blob/master/load_open_ephys_data.m
 
-## System requirements
+## システム要件
 
 - Windows 10 64bits
 - Intel i7
 - 32 GB RAM
 - MatlabR2016a (Signal Processing Toolbox, Statistics and Machine Learning Toolbox, Wavelet Toolbox, Bioinformatics Toolbox)
-- Tested on MatlabR2016a and MatlabR2018
+- MatlabR2016a と MatlabR2018 でテスト済み

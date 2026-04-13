@@ -1,0 +1,14 @@
+subject	session	macro_source_key	macro_channel	anatomy	source_uuid	n_micro_units	micro_units	micro_wire_prefixes	micro_wire_nums	orig_unit_ids	n_spike_arrays	paired	anatomy_simple
+sub-01	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala lAmyg, lateral amygdala	0a21e0b8-794c-421e-bac5-9ed68d1a40e7	3	T1_1,T1_2,T1_3	uAL	1,2,6	1,2,3	51	yes	Amygdala|L|lateral|code=lAmyg
+sub-01	ses-01	iEEG electrode 2	mAR2-mAR1	Hipp, Right Hippocampus rHipp, rostral hippocampus	93853090-57f4-4f0d-9826-2fa255f2e8ee	0					0	no	Hippocampus|R|rostral|code=rHipp
+sub-02	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	ea27fa69-6e0a-46ef-bfc9-35ba2b90d081	3	T1_1,T1_2,T1_3	uAL	5,8	1,2,12	51	yes	Amygdala|L|medial|code=mAmyg
+sub-02	ses-01	iEEG electrode 2	mAR2-mAR1	Amyg, Right Amygdala mAmyg, medial amygdala	ee334a46-84b2-4c87-8768-e2145a447fca	9	T2_1,T2_2,T2_3,T2_4,T2_5,T2_6,T2_7,T2_8,T2_9	uAR	1,2,3,4,5,6,7,8	3,4,5,6,7,8,9,10,11	149	yes	Amygdala|R|medial|code=mAmyg
+sub-03	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	7b95f549-0761-4589-af6f-991c304eddb6	3	T1_1,T1_2,T1_3	uAL	2,3,5	1,2,3	51	yes	Amygdala|L|medial|code=mAmyg
+sub-04	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	8a23cb60-cf95-4efe-904f-7d1f97ef9614	7	T1_1,T1_2,T1_3,T1_4,T1_5,T1_6,T1_7	uAL	1,2,3,4,6,7	1,2,3,4,5,6,7	119	yes	Amygdala|L|medial|code=mAmyg
+sub-06	ses-01	iEEG electrode 1	mAL2-mAL1		204c9fc2-3c5b-4181-88bb-777ad77978cf	0					0	no	
+sub-06	ses-01	iEEG electrode 2	mAR2-mAR1		5ce076c8-e9ab-45a5-9a61-bb3827c8b558	0					0	no	
+sub-07	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala lAmyg, lateral amygdala	97277b44-2e7d-41f9-8872-9bd65491ee0c	9	T1_1,T1_2,T1_3,T1_4,T1_5,T1_6,T1_7,T1_8,T1_9	uAL	1,2,4,5,6,7,8	1,2,3,4,5,6,7,8,9	99	yes	Amygdala|L|lateral|code=lAmyg
+sub-07	ses-01	iEEG electrode 2	mAR2-mAR1	Amyg, Right Amygdala mAmyg, medial amygdala	620121e6-e28b-43a8-a637-14e667439e54	7	T2_1,T2_2,T2_3,T2_4,T2_5,T2_6,T2_7	uAR	1,2,3,5,6,7,8	10,11,12,13,14,15,16	77	yes	Amygdala|R|medial|code=mAmyg
+sub-08	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	1b743a4a-fd4c-4113-9691-de4d325ccdb1	0					0	no	Amygdala|L|medial|code=mAmyg
+sub-09	ses-01	iEEG electrode 1	mAL2-mAL1	Amyg, Left Amygdala mAmyg, medial amygdala	3d037258-9406-4d7a-a200-121f1e987eef	0					0	no	Amygdala|L|medial|code=mAmyg
+sub-09	ses-01	iEEG electrode 2	mAR2-mAR1	Hipp, Right Hippocampus rHipp, rostral hippocampus	5a60a3ff-bffc-415c-8329-9eee0a0e471a	0					0	no	Hippocampus|R|rostral|code=rHipp

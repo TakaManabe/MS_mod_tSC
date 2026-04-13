@@ -39,7 +39,7 @@ Matrix = Matrix.Matrix;
 
 % Load stimulation times
 if isstim
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
 end
 
 % Main analysis for each cell

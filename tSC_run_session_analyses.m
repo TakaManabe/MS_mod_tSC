@@ -1,47 +1,75 @@
 function tSC_run_session_analyses(mainpath, animal, session, ch, isstim, isrun, exp)
-%TSC_RUN_SESSION_ANALYSES analyse tSC -- single unit recording sessions
+%TSC_RUN_SESSION_ANALYSES Analyze a session and update Matrix files.
 %
-%   TSC_RUN_SESSION_ANALYSES(MAINPATH,ANIMAL,SESSION,CH,ISSTIM,ISRUN,EXP)
-%   run all analyses on a session of simultaneous unit and LFP recordings
-%   and store results in the Matrix.mat and ses_Matrix.mat files. This code
-%   is for further analyses after single unit clusters and tSC were
-%   extracted with Kilosort and the tSC extraction package.
-%
-%   Required input arguments:
-%       MAINPATH: the acces route of the folder containing the results
-%           matrix and the database: folders with animal IDs containing
-%           folders with session IDs, containing the raw data and
-%           extracted tSCs in the \raw folder).
-%       ANIMAL: ID of the animal
-%       SESSION: ID of the session
-%       CH: number of the channel used for tSC extraction
-%       ISSTIM: logical variable indicating whether there are stimulation
-%           periods that need to be exluded from the data.
-%       ISRUN: logical variable indicating wheter there is movement data
-%           for freely behaving animals.
-%       EXP: name of the experiment used for choosing between
-%           preset settings for oscillation state detection defined by
-%           Kocsis et al, 2020 . Possible inputs: 'awake_mouse',
-%           'anesthetized_mouse', 'anesthetized_rat'.
-%
-%   See also THETA_DETECTION
+%   This function can run in two modes:
+%   1) Full mode: extracted tSC/theta files are available.
+%   2) Raw-only mode: those files are missing; only analyses that do not
+%      depend on extracted tSC files are executed.
 
-%   Bálint Király
-%   Institute of Experimental Medicine, Budapest, Hungary
-%   kiraly.balint@koki.hu
-%   03-Jan-2022
+% Resolve session data location and file prefix.
+filename = [animal, session];
+[fullpath, base] = resolve_session_fullpath(mainpath, animal, session, ch);
+
+% Stimulation file is optional; if missing, run as non-stim.
+stimFile1 = fullfile(mainpath, 'STIMULATIONS', [filename, '.mat']);
+stimFile2 = fullfile(mainpath, 'STIMULATIONS', [animal, '_', session, '.mat']);
+hasStimFile = exist(stimFile1, 'file') == 2 || exist(stimFile2, 'file') == 2;
+isstim_eff = logical(isstim) && hasStimFile;
+if isstim && ~isstim_eff
+    warning('tSC_run_session_analyses:missingStimFile', ...
+        'Missing stimulation file for %s (%s or %s). Running with isstim=0.', filename, stimFile1, stimFile2);
+end
+
+% Probe required extracted files.
+f.theta_cycles = [fullpath, '.theta.cycles.', ch, '.mat'];
+f.theta_cycleamp = [fullpath, '.theta.cycleamp.', ch, '.mat'];
+f.theta_phase = [fullpath, '.theta.phase.', ch, '.mat'];
+f.tsc_ica = [fullpath, '.tSCs.ica.', ch, '.mat'];
+f.emd = [fullpath, '.emd.', ch, '.mat'];
+f.emdif = [fullpath, '.emd.if.', ch, '.mat'];
+f.eeg = [fullpath, '.eeg.', ch, '.mat'];
+
+has_tsc_core = exist(f.theta_cycles, 'file') == 2 && exist(f.tsc_ica, 'file') == 2;
+has_theta_amp = exist(f.theta_cycleamp, 'file') == 2;
+has_theta_phase = exist(f.theta_phase, 'file') == 2;
+has_emd = exist(f.emd, 'file') == 2 && exist(f.emdif, 'file') == 2;
+has_eeg = exist(f.eeg, 'file') == 2;
 
 % theta property and tSC presence correlations
-tSC_thetaprop(mainpath, animal, session, ch, isstim, isrun);
-tSC_ratio_oscstate(mainpath, animal, session, ch, isstim, exp);
-% inter-spike-interval histograms
-logISI(mainpath, animal, session, isstim)
-% Fourier and Wavlet spectras
-neuron_spectra(mainpath ,animal, session, ch, isstim);
-% firing property and tSC presence correlations
-tSC_neuron_firingprop(mainpath,animal, session, ch, isstim);
-% tSC copuling of single units
-tSC_neuron_coupling(mainpath,animal, session, ch, isstim,1);
-% controll analysis with shuffled spikes for tSC coupling
-tSC_neuron_coupling(mainpath,animal, session, ch, isstim,0);
+if has_tsc_core && has_theta_amp
+    tSC_thetaprop(mainpath, animal, session, ch, isstim_eff, isrun);
+    tSC_ratio_oscstate(mainpath, animal, session, ch, isstim_eff, exp);
+else
+    warning('tSC_run_session_analyses:skipThetaProps', ...
+        'Skipping tSC_thetaprop/tSC_ratio_oscstate for %s (missing extracted tSC/theta files).', filename);
+end
 
+% inter-spike-interval histograms (raw spikes only)
+logISI(mainpath, animal, session, isstim_eff);
+
+% Fourier and wavelet spectra (needs eeg)
+if has_eeg
+    neuron_spectra(mainpath, animal, session, ch, isstim_eff);
+else
+    warning('tSC_run_session_analyses:skipNeuronSpectra', ...
+        'Skipping neuron_spectra for %s (missing %s).', filename, f.eeg);
+end
+
+% firing property and tSC presence correlations
+if has_tsc_core && has_theta_phase
+    tSC_neuron_firingprop(mainpath, animal, session, ch, isstim_eff);
+else
+    warning('tSC_run_session_analyses:skipNeuronFiringProp', ...
+        'Skipping tSC_neuron_firingprop for %s (missing theta.phase/tSC files).', filename);
+end
+
+% tSC coupling of single units
+if has_tsc_core && has_theta_phase && has_emd
+    tSC_neuron_coupling(mainpath, animal, session, ch, isstim_eff, 1);
+    tSC_neuron_coupling(mainpath, animal, session, ch, isstim_eff, 0);
+else
+    warning('tSC_run_session_analyses:skipNeuronCoupling', ...
+        'Skipping tSC_neuron_coupling for %s (missing emd/theta.phase/tSC files).', filename);
+end
+
+end

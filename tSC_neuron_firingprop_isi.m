@@ -25,12 +25,10 @@ function tSC_neuron_firingprop_isi(mainPath, animal, session, ch, isstim, neuron
 global Colors
 
 % Define directories
-base = fullfile(mainPath,animal,session);
 figfold = 'Figures';
-mkdir(fullfile(base,figfold));
-folder = 'raw';
 filename = [animal,session];
-fullpath = fullfile(base,folder,[filename,'_1']);
+[fullpath, base] = resolve_session_fullpath(mainPath, animal, session, ch);
+mkdir(fullfile(base,figfold));
 
 % Load extracted emds
 theta_cycles = cell2mat(struct2cell(load([fullpath,'.theta.cycles.',ch,'.mat'])));
@@ -56,7 +54,7 @@ if isstim == 1
         projections(1,:) = [];
     end
 
-    stim = cell2mat(struct2cell(load(fullfile(mainPath,'STIMULATIONS',[filename,'.mat']),'stim')));
+    stim = load_session_stim(mainPath, animal, session);
     s_inx = find(stim(theta_cycles(:,2)) == 1);
     theta_cycles(s_inx,:) = [];
     projections(s_inx,:) = [];

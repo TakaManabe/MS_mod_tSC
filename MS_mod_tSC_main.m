@@ -32,10 +32,17 @@ if ~isfolder(mainpath)
         error('No awake_mouse folder selected.');
     end
 end
-load(fullfile(mainpath,'ses_Matrix.mat'),'ses_Matrix');
+matrixFile = fullfile(mainpath,'Matrix.mat');
+sesMatrixFile = fullfile(mainpath,'ses_Matrix.mat');
+if ~(exist(matrixFile,'file') && exist(sesMatrixFile,'file'))
+    error(['Missing Matrix.mat / ses_Matrix.mat in ',mainpath,'. ',...
+        'This folder seems to contain raw sessions only (e.g. awake_mouse/<animal>/<session>). ',...
+        'Run tSC_run_session_analyses first (after tSC extraction) to create these summary files at the root of awake_mouse.']);
+end
+load(sesMatrixFile,'ses_Matrix');
 n_ses = length(ses_Matrix);
-load(fullfile(mainpath,'Matrix.mat'),'Matrix');
-n = length(Matrix);
+load(matrixFile,'Matrix');
+n = length(Matrix);
 
 % define global variables
 global Colors Samplingrate
@@ -454,7 +461,12 @@ if ~isfolder(mainpath)
         error('No awake_mouse_control folder selected.');
     end
 end
-load(fullfile(mainpath,'ses_Matrix.mat'),'ses_Matrix');
+sesMatrixFile = fullfile(mainpath,'ses_Matrix.mat');
+if ~exist(sesMatrixFile,'file')
+    error(['Missing ses_Matrix.mat in ',mainpath,'. ',...
+        'Prepare awake_mouse_control summary first or choose a folder that already contains ses_Matrix.mat.']);
+end
+load(sesMatrixFile,'ses_Matrix');
 noninhib_tsc_ratio =  vertcat(ses_Matrix.noninhib_tsc_ratio);
 inhib_tsc_ratio =  vertcat(ses_Matrix.inhib_tsc_ratio);
 figure

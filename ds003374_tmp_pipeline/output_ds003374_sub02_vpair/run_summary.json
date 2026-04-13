@@ -1,0 +1,26 @@
+{
+  "ds_root": "/Users/takamanabe/Documents/Git/ds003374",
+  "nix_dir": "/Users/takamanabe/Documents/Git/ds003374/bidsignore/data_NIX",
+  "n_subject_pages": 1,
+  "subjects": [
+    "sub-02"
+  ],
+  "outputs": {
+    "subject_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_sub02_vpair/subject_inventory.tsv",
+    "unit_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_sub02_vpair/unit_inventory.tsv",
+    "source_inventory_tsv": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_sub02_vpair/source_inventory.tsv",
+    "index_html": "/Users/takamanabe/Documents/Git/MS_mod_tSC/ds003374_tmp_pipeline/output_ds003374_sub02_vpair/index.html"
+  },
+  "params": {
+    "trial_gap_sec": 0.0,
+    "MS_LFP_OVERLAY": true,
+    "MS_LFP_SIGMA": 0.004,
+    "MS_LFP_A": 0.2,
+    "MS_LFP_A0": 1.0,
+    "MS_LFP_D_DEFAULT": 3.0,
+    "MS_LFP_POST_SMOOTH_SEC": 0.012,
+    "interactive_max_points": 20000,
+    "plotly_js": "cdn",
+    "anatomy_substring": "amyg"
+  }
+}
