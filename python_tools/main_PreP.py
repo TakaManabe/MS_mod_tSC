@@ -96,16 +96,14 @@ MODE_SHORT_TITLE_MAP = {
 }
 DEFAULT_THETA_BAND_TOKENS = [
     "1-4",
-    "4-6",
+    "1-8",
+    "1-12",
     "4-8",
-    "4-10",
     "4-12",
-    "6-8",
-    "6-10",
-    "6-12",
-    "8-10",
     "8-12",
-    "10-12",
+    "12-30",
+    "30-70",
+    "70-200"
 ]
 DELTA_BAND = (1.0, 4.0)
 PLOTLY_COLORS = [
@@ -466,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--downsample-rate",
         type=float,
-        default=100.0,
+        default=500.0,
         help=(
             "Target sampling rate [Hz] for preprocessing downsampling. "
             "If >0, anti-alias lowpass is auto-set from target Nyquist and applied before downsampling. "
