@@ -45,6 +45,7 @@ SUPPORTED_MODES = (
     "entropy_td",
     "signal",
     "hilbert",
+    "hilphase",
     "coherence_band",
     "pearson",
     "coherence",
@@ -57,6 +58,7 @@ TIME_SERIES_MODES = {
     "entropy_td",
     "signal",
     "hilbert",
+    "hilphase",
     "coherence_band",
     "pearson",
     "coherence",
@@ -76,6 +78,7 @@ MODE_TITLE_MAP = {
     "entropy_td": "Entropy TD Balance",
     "signal": "Signal",
     "hilbert": "Hilbert",
+    "hilphase": "HilPhase",
     "coherence_band": "Coherence Band",
     "pearson": "Pearson Band",
     "coherence": "Coherence",
@@ -89,6 +92,7 @@ MODE_SHORT_TITLE_MAP = {
     "entropy_td": "Entropy TD",
     "signal": "Signal",
     "hilbert": "Hilbert",
+    "hilphase": "HilPhase",
     "coherence_band": "CohBand",
     "pearson": "Pearson",
     "coherence": "Coherence",
@@ -340,7 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Analysis modes to run. Supported: "
             "psd theta_power theta_delta_ratio entropy entropy_td signal hilbert "
-            "coherence_band pearson coherence granger. "
+            "hilphase coherence_band pearson coherence granger. "
             "If omitted, all implemented modes are executed."
         ),
     )
@@ -352,8 +356,45 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_THETA_BAND_TOKENS,
         help=(
             "Theta bands for signal/hilbert/theta_power/theta_delta_ratio/entropy/entropy_td/"
-            "coherence_band/pearson. "
+            "hilphase/coherence_band/pearson. "
             "Formats: '4-8 4-10' or flat list '4 8 4 10'."
+        ),
+    )
+    parser.add_argument(
+        "--hilphase_min_z",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum max Rayleigh Z required to display HilPhase lag. "
+            "Windows below this threshold are set to NaN. Default: 0."
+        ),
+    )
+    parser.add_argument(
+        "--hilphase_min_plv",
+        type=float,
+        default=0.2,
+        help=(
+            "Minimum PLV at the max-Z lag required to display HilPhase lag. "
+            "Windows below this threshold are set to NaN. Default: 0.2."
+        ),
+    )
+    parser.add_argument(
+        "--hilphase_min_peak_delta_z",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum Rayleigh-Z separation between the best and second-best "
+            "HilPhase lag. Windows with flatter peaks are set to NaN. Default: 0."
+        ),
+    )
+    parser.add_argument(
+        "--hilphase_min_peak_delta_frac",
+        type=float,
+        default=0.02,
+        help=(
+            "Minimum fractional Rayleigh-Z separation between the best and "
+            "second-best HilPhase lag, computed as (best-second)/best. "
+            "Windows with flatter peaks are set to NaN. Default: 0.02."
         ),
     )
     parser.add_argument(
@@ -1698,6 +1739,262 @@ def _compute_coherence_band_timeseries_pair(
     return time_centers.astype(np.float32), coh_out, plv_out
 
 
+def _compute_hilphase_timeseries_pair(
+    x_sig: np.ndarray,
+    y_sig: np.ndarray,
+    t_points: np.ndarray,
+    sr: float,
+    win_sec: float,
+    step_sec: float,
+    bands: list[tuple[str, tuple[float, float]]],
+    min_z: float,
+    min_plv: float,
+    min_peak_delta_z: float,
+    min_peak_delta_frac: float,
+) -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, np.ndarray]]:
+    x = np.asarray(x_sig, dtype=float).reshape(-1)
+    y = np.asarray(y_sig, dtype=float).reshape(-1)
+    t = np.asarray(t_points, dtype=float).reshape(-1)
+    n = min(x.size, y.size, t.size)
+    if n < 2:
+        return np.array([], dtype=np.float32), {}, {}
+    x = x[:n]
+    y = y[:n]
+    t = t[:n]
+
+    time_centers = _build_time_right(float(t[0]), float(t[-1]), step_sec)
+    if time_centers.size == 0:
+        return np.array([], dtype=np.float32), {}, {}
+    is_monotonic_time = not np.any(np.diff(t) < 0)
+    if is_monotonic_time:
+        win_left = np.searchsorted(t, time_centers - float(win_sec), side="left")
+        win_right = np.searchsorted(t, time_centers, side="right")
+    else:
+        indices = _causal_window_indices(t, time_centers, win_sec=win_sec)
+
+    lag_ms_out: dict[str, np.ndarray] = {}
+    z_out: dict[str, np.ndarray] = {}
+    sr_f = float(sr)
+    nyq = sr_f / 2.0
+    min_window_samples = int(max(3, round(float(win_sec) * sr_f)))
+    min_z_f = float(max(0.0, min_z))
+    min_plv_f = float(max(0.0, min_plv))
+    min_peak_delta_z_f = float(max(0.0, min_peak_delta_z))
+    min_peak_delta_frac_f = float(max(0.0, min_peak_delta_frac))
+
+    for label, (fmin, fmax) in bands:
+        fmin_f = float(fmin)
+        fmax_f = float(fmax)
+        if fmin_f <= 0 or fmax_f <= 0 or fmin_f >= fmax_f or fmax_f >= nyq:
+            print(
+                f"\033[1;33m -- HilPhase: skipping invalid band "
+                f"{label} [{fmin_f:g}, {fmax_f:g}] for sr={sr_f:g}Hz\033[0m"
+            )
+            continue
+
+        sos = butter(4, [fmin_f, fmax_f], btype="bandpass", fs=sr_f, output="sos")
+        x_f = sosfiltfilt(sos, x)
+        y_f = sosfiltfilt(sos, y)
+        phase_hc = np.angle(hilbert(x_f))
+        phase_ms = np.angle(hilbert(y_f))
+
+        center_hz = 0.5 * (fmin_f + fmax_f)
+        max_lag_samples = int(round((0.5 / center_hz) * sr_f))
+        max_lag_samples = int(max(0, max_lag_samples))
+        lags = np.arange(-max_lag_samples, max_lag_samples + 1, dtype=np.int64)
+        min_common_samples = int(max(3, min_window_samples - (2 * max_lag_samples)))
+
+        lag_vals = np.full(time_centers.size, np.nan, dtype=np.float32)
+        z_vals = np.full(time_centers.size, np.nan, dtype=np.float32)
+
+        if is_monotonic_time:
+            window_lengths = win_right - win_left
+            base_start = np.maximum(win_left, max_lag_samples)
+            base_end = np.minimum(win_right, n - max_lag_samples)
+            base_counts_nominal = base_end - base_start
+            valid_windows = (
+                (window_lengths >= min_window_samples)
+                & (base_counts_nominal >= min_common_samples)
+            )
+            valid_window_idx = np.where(valid_windows)[0]
+
+            base_offset = int(max_lag_samples)
+            base_stop = int(n - max_lag_samples)
+            if valid_window_idx.size > 0 and base_stop > base_offset:
+                rel_start = (base_start[valid_window_idx] - base_offset).astype(np.int64)
+                rel_end = (base_end[valid_window_idx] - base_offset).astype(np.int64)
+                base_idx = np.arange(base_offset, base_stop, dtype=np.int64)
+                e_ms = np.exp(1j * phase_ms)
+                e_hc_conj = np.exp(-1j * phase_hc)
+
+                best_z = np.full(valid_window_idx.size, -np.inf, dtype=float)
+                best_lag = np.full(valid_window_idx.size, np.nan, dtype=float)
+                best_phase_err = np.full(valid_window_idx.size, np.inf, dtype=float)
+                best_count = np.zeros(valid_window_idx.size, dtype=float)
+                second_z = np.full(valid_window_idx.size, -np.inf, dtype=float)
+
+                for lag_samples in lags:
+                    q_raw = e_ms[base_idx] * e_hc_conj[base_idx + int(lag_samples)]
+                    q_ok = np.isfinite(q_raw.real) & np.isfinite(q_raw.imag)
+                    q = np.where(q_ok, q_raw, 0.0 + 0.0j)
+
+                    csum_q = np.empty(q.size + 1, dtype=np.complex128)
+                    csum_q[0] = 0.0 + 0.0j
+                    csum_q[1:] = np.cumsum(q, dtype=np.complex128)
+                    sums = csum_q[rel_end] - csum_q[rel_start]
+
+                    csum_n = np.empty(q_ok.size + 1, dtype=np.int64)
+                    csum_n[0] = 0
+                    csum_n[1:] = np.cumsum(q_ok, dtype=np.int64)
+                    counts = csum_n[rel_end] - csum_n[rel_start]
+
+                    valid_counts = counts >= 3
+                    if not np.any(valid_counts):
+                        continue
+
+                    z_lag = np.full(valid_window_idx.size, np.nan, dtype=float)
+                    phase_err = np.full(valid_window_idx.size, np.inf, dtype=float)
+                    abs_sum = np.abs(sums[valid_counts])
+                    z_lag[valid_counts] = (abs_sum * abs_sum) / counts[valid_counts]
+                    phase_err[valid_counts] = np.abs(np.angle(sums[valid_counts]))
+
+                    finite_z = np.isfinite(z_lag)
+                    finite_best = np.isfinite(best_z)
+                    first_valid = finite_z & (~finite_best)
+                    z_tol = np.full(best_z.size, np.inf, dtype=float)
+                    z_tol[finite_best] = np.maximum(
+                        1e-6,
+                        1e-3 * np.maximum(np.abs(best_z[finite_best]), 1.0),
+                    )
+                    better_z = np.zeros(best_z.size, dtype=bool)
+                    same_z_better_phase = np.zeros(best_z.size, dtype=bool)
+                    compare = finite_z & finite_best
+                    if np.any(compare):
+                        better_z[compare] = z_lag[compare] > (best_z[compare] + z_tol[compare])
+                        same_z_better_phase[compare] = (
+                            (np.abs(z_lag[compare] - best_z[compare]) <= z_tol[compare])
+                            & (phase_err[compare] < best_phase_err[compare])
+                        )
+                    update = first_valid | better_z | same_z_better_phase
+                    if not np.any(update):
+                        second_update = finite_z & (~update) & (z_lag > second_z)
+                        if np.any(second_update):
+                            second_z[second_update] = z_lag[second_update]
+                        continue
+
+                    second_from_old_best = update & np.isfinite(best_z)
+                    if np.any(second_from_old_best):
+                        second_z[second_from_old_best] = np.maximum(
+                            second_z[second_from_old_best],
+                            best_z[second_from_old_best],
+                        )
+                    second_from_current = finite_z & (~update) & (z_lag > second_z)
+                    if np.any(second_from_current):
+                        second_z[second_from_current] = z_lag[second_from_current]
+
+                    best_z[update] = z_lag[update]
+                    best_lag[update] = float(lag_samples) / sr_f * 1000.0
+                    best_phase_err[update] = phase_err[update]
+                    best_count[update] = counts[update]
+
+                keep = np.isfinite(best_z)
+                if min_z_f > 0.0:
+                    keep &= best_z >= min_z_f
+                if min_plv_f > 0.0:
+                    best_plv = np.full(best_z.size, np.nan, dtype=float)
+                    m_count = best_count > 0
+                    best_plv[m_count] = np.sqrt(best_z[m_count] / best_count[m_count])
+                    keep &= best_plv >= min_plv_f
+                if min_peak_delta_z_f > 0.0 or min_peak_delta_frac_f > 0.0:
+                    delta_z = best_z - second_z
+                    delta_z[~np.isfinite(second_z)] = np.inf
+                    if min_peak_delta_z_f > 0.0:
+                        keep &= delta_z >= min_peak_delta_z_f
+                    if min_peak_delta_frac_f > 0.0:
+                        delta_frac = np.full(best_z.size, np.nan, dtype=float)
+                        m_best = np.isfinite(best_z) & (best_z > 0)
+                        delta_frac[m_best] = delta_z[m_best] / best_z[m_best]
+                        keep &= delta_frac >= min_peak_delta_frac_f
+                if np.any(keep):
+                    lag_vals[valid_window_idx[keep]] = best_lag[keep].astype(np.float32)
+                    z_vals[valid_window_idx[keep]] = best_z[keep].astype(np.float32)
+        else:
+            for i, idx in enumerate(indices):
+                if idx.size < min_window_samples:
+                    continue
+                idx_base = idx[(idx >= max_lag_samples) & (idx < (n - max_lag_samples))]
+                if idx_base.size < min_common_samples:
+                    continue
+
+                best_z = -np.inf
+                best_lag = np.nan
+                best_phase_err = np.inf
+                best_count = 0
+                second_z = -np.inf
+
+                for lag_samples in lags:
+                    hc_idx = idx_base + int(lag_samples)
+                    m_idx = (hc_idx >= 0) & (hc_idx < n)
+                    if int(np.sum(m_idx)) < 3:
+                        continue
+
+                    ms_idx = idx_base[m_idx]
+                    hc_idx = hc_idx[m_idx]
+                    dphi = np.angle(np.exp(1j * (phase_ms[ms_idx] - phase_hc[hc_idx])))
+                    dphi = dphi[np.isfinite(dphi)]
+                    n_eff = int(dphi.size)
+                    if n_eff < 3:
+                        continue
+
+                    mean_vec = np.mean(np.exp(1j * dphi))
+                    plv = float(np.abs(mean_vec))
+                    z_val = float(n_eff * (plv ** 2))
+                    if not np.isfinite(z_val):
+                        continue
+                    phase_err_one = float(abs(np.angle(mean_vec)))
+                    if not np.isfinite(best_z):
+                        better_z = True
+                        same_z_better_phase = False
+                    else:
+                        z_tol_one = max(1e-6, 1e-3 * max(abs(best_z), 1.0))
+                        better_z = z_val > (best_z + z_tol_one)
+                        same_z_better_phase = (
+                            abs(z_val - best_z) <= z_tol_one
+                            and phase_err_one < best_phase_err
+                        )
+                    if better_z or same_z_better_phase:
+                        if np.isfinite(best_z):
+                            second_z = max(second_z, best_z)
+                        best_z = z_val
+                        best_lag = float(lag_samples) / sr_f * 1000.0
+                        best_phase_err = phase_err_one
+                        best_count = n_eff
+                    elif np.isfinite(z_val):
+                        second_z = max(second_z, z_val)
+
+                keep = np.isfinite(best_z)
+                if keep and min_z_f > 0.0:
+                    keep = best_z >= min_z_f
+                if keep and min_plv_f > 0.0:
+                    best_plv = np.sqrt(best_z / float(best_count)) if best_count > 0 else np.nan
+                    keep = np.isfinite(best_plv) and best_plv >= min_plv_f
+                if keep and (min_peak_delta_z_f > 0.0 or min_peak_delta_frac_f > 0.0):
+                    delta_z = best_z - second_z if np.isfinite(second_z) else np.inf
+                    if min_peak_delta_z_f > 0.0:
+                        keep = delta_z >= min_peak_delta_z_f
+                    if keep and min_peak_delta_frac_f > 0.0:
+                        delta_frac = delta_z / best_z if best_z > 0 else np.nan
+                        keep = np.isfinite(delta_frac) and delta_frac >= min_peak_delta_frac_f
+                if keep:
+                    lag_vals[i] = np.float32(best_lag)
+                    z_vals[i] = np.float32(best_z)
+
+        lag_ms_out[label] = lag_vals
+        z_out[label] = z_vals
+
+    return time_centers.astype(np.float32), lag_ms_out, z_out
+
+
 def _compute_pearson_band_timeseries_pair(
     x_sig: np.ndarray,
     y_sig: np.ndarray,
@@ -2625,6 +2922,159 @@ def _build_coherence_band_mode_cells(
     return out
 
 
+def _compute_hilphase_cell_for_entry(
+    entry: EEGEntry,
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    theta_bands: list[tuple[str, tuple[float, float]]],
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    smooth_win_sec: float | None,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+    hilphase_min_z: float,
+    hilphase_min_plv: float,
+    hilphase_min_peak_delta_z: float,
+    hilphase_min_peak_delta_frac: float,
+) -> ModeCell | None:
+    pair = _prepare_hc_pseudo_pair(
+        entry=entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        time_range=time_range,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+    )
+    if pair is None:
+        return None
+    t_sig, x_sig, y_sig = pair
+
+    t_out, lag_out, z_out = _compute_hilphase_timeseries_pair(
+        x_sig=x_sig,
+        y_sig=y_sig,
+        t_points=t_sig,
+        sr=float(analysis_sampling_rate),
+        win_sec=float(tf_win_sec),
+        step_sec=float(tf_step_sec),
+        bands=theta_bands,
+        min_z=float(hilphase_min_z),
+        min_plv=float(hilphase_min_plv),
+        min_peak_delta_z=float(hilphase_min_peak_delta_z),
+        min_peak_delta_frac=float(hilphase_min_peak_delta_frac),
+    )
+    if t_out.size < 2:
+        return None
+
+    lag_traces: list[TraceSpec] = []
+    z_traces: list[TraceSpec] = []
+    for bidx, (band_label, _) in enumerate(theta_bands):
+        color = PLOTLY_COLORS[bidx % len(PLOTLY_COLORS)]
+
+        y_lag = lag_out.get(band_label)
+        if y_lag is not None:
+            yy = np.asarray(y_lag, dtype=float)
+            xx, yy = _downsample_xy(t_out, yy, max_points=max_points)
+            lag_traces.append(
+                TraceSpec(
+                    name=band_label,
+                    x=xx,
+                    y=yy,
+                    color=color,
+                    width=1.2,
+                    dash="solid",
+                )
+            )
+
+        y_z = z_out.get(band_label)
+        if y_z is not None:
+            yy = np.asarray(y_z, dtype=float)
+            xx, yy = _downsample_xy(t_out, yy, max_points=max_points)
+            z_traces.append(
+                TraceSpec(
+                    name=band_label,
+                    x=xx,
+                    y=yy,
+                    color=color,
+                    width=1.2,
+                    dash="solid",
+                )
+            )
+
+    if not lag_traces and not z_traces:
+        return None
+    payload = {
+        "primary_panel_label": "Lag ms",
+        "secondary_panel_label": "max Z",
+        "secondary_traces": tuple(z_traces),
+    }
+    return ModeCell(subject=entry.subject, session=entry.session, traces=tuple(lag_traces), payload=payload)
+
+
+def _build_hilphase_mode_cells(
+    eeg_entries: list[EEGEntry],
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    theta_bands: list[tuple[str, tuple[float, float]]],
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    smooth_win_sec: float | None,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+    hilphase_min_z: float,
+    hilphase_min_plv: float,
+    hilphase_min_peak_delta_z: float,
+    hilphase_min_peak_delta_frac: float,
+    n_jobs: int,
+) -> list[ModeCell]:
+    out: list[ModeCell] = []
+    worker = partial(
+        _compute_hilphase_cell_for_entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        theta_bands=theta_bands,
+        time_range=time_range,
+        tf_win_sec=tf_win_sec,
+        tf_step_sec=tf_step_sec,
+        max_points=max_points,
+        smooth_win_sec=smooth_win_sec,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+        hilphase_min_z=hilphase_min_z,
+        hilphase_min_plv=hilphase_min_plv,
+        hilphase_min_peak_delta_z=hilphase_min_peak_delta_z,
+        hilphase_min_peak_delta_frac=hilphase_min_peak_delta_frac,
+    )
+    for cell in tqdm(
+        _parallel_map(eeg_entries, worker, n_jobs=n_jobs),
+        total=len(eeg_entries),
+        desc="Mode[hilphase]",
+        unit="eeg",
+    ):
+        if cell is not None:
+            out.append(cell)
+    return out
+
+
 def _compute_pearson_cell_for_entry(
     entry: EEGEntry,
     analysis_sampling_rate: float,
@@ -2966,7 +3416,7 @@ def _build_subject_mode_figure(
         raise ValueError("No cells to plot.")
 
     include_spikes = (mode in TIME_SERIES_MODES) and bool(ms_units_by_session)
-    split_metric_mode = mode in {"coherence_band", "pearson"}
+    split_metric_mode = mode in {"coherence_band", "hilphase", "pearson"}
 
     cells_sorted = sorted(mode_cells, key=lambda c: natural_key(c.session))
     row_specs: list[dict[str, Any]] = []
@@ -5442,6 +5892,8 @@ def _mode_axis_titles(
         return "Time (s)", "Entropy TD Balance"
     if mode == "coherence_band":
         return "Time (s)", "Coh / PLV"
+    if mode == "hilphase":
+        return "Time (s)", "Optimal Lag (ms) / max Z"
     if mode == "pearson":
         return "Time (s)", "Pearson r / r2"
     if mode == "coherence":
@@ -5464,6 +5916,14 @@ def main_code(args: argparse.Namespace) -> None:
         raise ValueError("--tf_step_sec must be > 0.")
     if args.interactive_max_points <= 0:
         raise ValueError("--interactive_max_points must be > 0.")
+    if float(args.hilphase_min_z) < 0:
+        raise ValueError("--hilphase_min_z must be >= 0.")
+    if float(args.hilphase_min_plv) < 0 or float(args.hilphase_min_plv) > 1:
+        raise ValueError("--hilphase_min_plv must be between 0 and 1.")
+    if float(args.hilphase_min_peak_delta_z) < 0:
+        raise ValueError("--hilphase_min_peak_delta_z must be >= 0.")
+    if float(args.hilphase_min_peak_delta_frac) < 0:
+        raise ValueError("--hilphase_min_peak_delta_frac must be >= 0.")
     if (not np.isfinite(args.db_eps)) or float(args.db_eps) <= 0:
         raise ValueError("--db_eps must be a positive finite value.")
     if (
@@ -5878,6 +6338,38 @@ def main_code(args: argparse.Namespace) -> None:
             ms_lfp_distance_map=ms_lfp_distance_map,
             ms_lfp_d_default=float(ms_lfp_d_default),
             ms_lfp_post_smooth_sec=float(ms_lfp_post_smooth_sec),
+            n_jobs=n_jobs,
+        )
+
+    if "hilphase" in modes:
+        print(
+            "-- HilPhase filters: "
+            f"min_z={float(args.hilphase_min_z):g}, "
+            f"min_plv={float(args.hilphase_min_plv):g}, "
+            f"min_peak_delta_z={float(args.hilphase_min_peak_delta_z):g}, "
+            f"min_peak_delta_frac={float(args.hilphase_min_peak_delta_frac):g}"
+        )
+        assert ts_range is not None
+        mode_cells["hilphase"] = _build_hilphase_mode_cells(
+            eeg_entries=eeg_entries,
+            analysis_sampling_rate=analysis_sampling_rate,
+            spike_sampling_rate=float(args.sampling_rate),
+            theta_bands=theta_bands,
+            time_range=ts_range,
+            tf_win_sec=float(args.tf_win_sec),
+            tf_step_sec=float(args.tf_step_sec),
+            max_points=int(args.interactive_max_points),
+            smooth_win_sec=smooth_win_sec,
+            ms_lfp_sigma=float(ms_lfp_sigma),
+            ms_lfp_a=float(ms_lfp_a),
+            ms_lfp_a0=float(ms_lfp_a0),
+            ms_lfp_distance_map=ms_lfp_distance_map,
+            ms_lfp_d_default=float(ms_lfp_d_default),
+            ms_lfp_post_smooth_sec=float(ms_lfp_post_smooth_sec),
+            hilphase_min_z=float(args.hilphase_min_z),
+            hilphase_min_plv=float(args.hilphase_min_plv),
+            hilphase_min_peak_delta_z=float(args.hilphase_min_peak_delta_z),
+            hilphase_min_peak_delta_frac=float(args.hilphase_min_peak_delta_frac),
             n_jobs=n_jobs,
         )
 
