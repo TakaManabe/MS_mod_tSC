@@ -33,7 +33,13 @@ def build_ap_kernel(
     span_sigma: float = 5.0,
 ) -> np.ndarray:
     """
-    Discretize V(t) = -A * (t/sigma^2) * exp(-t^2/(2*sigma^2)).
+    Discretize a peak-aligned first derivative Gaussian AP kernel.
+
+    Base waveform:
+        V(u) = -A * (u/sigma^2) * exp(-u^2/(2*sigma^2))
+
+    Its positive maximum is at u = -sigma.  We evaluate u = t - sigma so
+    the positive maximum is aligned to t = 0, i.e. the spike sample.
 
     The kernel spans [-span_sigma*sigma, +span_sigma*sigma] on the
     sampling grid defined by sampling_rate.
@@ -48,8 +54,9 @@ def build_ap_kernel(
     span = max(float(span_sigma), 1.0)
     half_width = max(1, int(np.ceil(span * sigma * fs)))
     t = np.arange(-half_width, half_width + 1, dtype=float) / fs
+    u = t - sigma
     sigma2 = sigma * sigma
-    kernel = -float(amplitude) * (t / sigma2) * np.exp(-(t * t) / (2.0 * sigma2))
+    kernel = -float(amplitude) * (u / sigma2) * np.exp(-(u * u) / (2.0 * sigma2))
     return np.asarray(kernel, dtype=float)
 
 

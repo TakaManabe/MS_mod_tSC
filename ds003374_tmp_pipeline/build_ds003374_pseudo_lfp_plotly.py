@@ -2011,7 +2011,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--trial-gap-sec", type=float, default=0.0, help="Gap inserted between trials when concatenating.")
     p.add_argument("--MS_LFP_OVERLAY", type=str, default="true", help="Overlay spike rasters on pseudo-LFP rows.")
-    p.add_argument("--MS_LFP_SIGMA", type=float, default=0.004, help="Pseudo-LFP AP kernel sigma [sec].")
+    p.add_argument(
+        "--MS_LFP_SIGMA",
+        type=float,
+        default=0.004,
+        help="Pseudo-LFP first-derivative Gaussian kernel sigma [sec]; positive peak is spike-aligned.",
+    )
     p.add_argument("--MS_LFP_A", type=float, default=0.2, help="Pseudo-LFP AP kernel amplitude A.")
     p.add_argument("--MS_LFP_A0", type=float, default=1.0, help="Pseudo-LFP gain A0.")
     p.add_argument("--MS_LFP_D_DEFAULT", type=float, default=3.0, help="Pseudo-LFP default distance d.")
