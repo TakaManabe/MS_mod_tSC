@@ -16,6 +16,7 @@ from scipy import signal
 from scipy.io import loadmat
 from scipy.signal import butter, hilbert, resample_poly, sosfiltfilt, welch
 from scipy.stats import t as student_t
+from scipy.stats import wilcoxon
 from tqdm import tqdm
 
 from my_FileLoad import matFileLoad
@@ -108,6 +109,16 @@ DEFAULT_THETA_BAND_TOKENS = [
     "12-30",
     "30-70",
     "70-200"
+]
+DEFAULT_GRANGER_STATS_BAND_TOKENS = [
+    "1-4",
+    "4-10",
+    "18-30",
+    "35-55",
+    "65-85",
+    "90-115",
+    "120-145",
+    "160-200",
 ]
 DELTA_BAND = (1.0, 4.0)
 PLOTLY_COLORS = [
@@ -588,25 +599,25 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         type=float,
         metavar=("FMIN", "FMAX"),
-        default=[1.0, 40.0],
+        default=[1.0, 120.0],
         help=(
             "Frequency range [Hz] for Granger gPDC curve display. "
-            "Default: 1 40."
+            "Default: 1 120."
         ),
     )
     parser.add_argument(
         "--granger_n_freqs",
         type=int,
         default=50,
-        help="Number of frequency bins for Granger gPDC curves. Default: 160.",
+        help="Number of frequency bins for Granger gPDC curves. Default: 50.",
     )
     parser.add_argument(
         "--granger_order_max",
         type=int,
-        default=10,
+        default=15,
         help=(
             "Maximum candidate MVAR order p for Granger model-order selection. "
-            "Default: 30."
+            "Default: 15."
         ),
     )
     parser.add_argument(
@@ -626,12 +637,42 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--granger_fixed_order",
+        type=int,
+        default=0,
+        help=(
+            "Fixed MVAR order p for Granger. If >0, skips per-window order selection "
+            "and fits every window with this p. Default: 0 (use order selection)."
+        ),
+    )
+    parser.add_argument(
+        "--granger_stats_pdf",
+        type=str,
+        default="AUTO",
+        help=(
+            "Output PDF path for group-level Granger statistics. Use AUTO to save next "
+            "to the parent HTML, or NONE to disable. Default: AUTO."
+        ),
+    )
+    parser.add_argument(
+        "--granger_stats_bands",
+        nargs="+",
+        type=str,
+        metavar="BAND",
+        default=DEFAULT_GRANGER_STATS_BAND_TOKENS,
+        help=(
+            "Frequency bands for Granger statistics PDF. "
+            "Formats: '1-4 4-10' or flat list '1 4 4 10'. "
+            "Default: 1-4 4-10 18-35 30-50 50-70 70-100 100-140 160-200."
+        ),
+    )
+    parser.add_argument(
         "--granger_epoch_jobs",
         type=int,
         default=8,
         help=(
             "Parallel workers for Granger epoch/window processing inside each session entry. "
-            "Default: 1 (disabled)."
+            "Default: 8."
         ),
     )
     parser.add_argument(
@@ -1035,9 +1076,12 @@ def _fmt_freq(x: float) -> str:
     return f"{x:g}"
 
 
-def _parse_theta_bands(tokens: list[str] | tuple[str, ...] | None) -> list[tuple[str, tuple[float, float]]]:
+def _parse_freq_bands(
+    tokens: list[str] | tuple[str, ...] | None,
+    arg_name: str,
+) -> list[tuple[str, tuple[float, float]]]:
     if not tokens:
-        raise ValueError("--theta_bands must not be empty.")
+        raise ValueError(f"{arg_name} must not be empty.")
 
     bands_raw: list[tuple[float, float]] = []
     flat_vals: list[float] = []
@@ -1058,13 +1102,13 @@ def _parse_theta_bands(tokens: list[str] | tuple[str, ...] | None) -> list[tuple
     if flat_vals:
         if len(flat_vals) % 2 != 0:
             raise ValueError(
-                "Invalid --theta_bands flat list. Provide pairs: e.g. '4 8 4 10 4 12'."
+                f"Invalid {arg_name} flat list. Provide pairs: e.g. '4 8 4 10 4 12'."
             )
         for i in range(0, len(flat_vals), 2):
             bands_raw.append((float(flat_vals[i]), float(flat_vals[i + 1])))
 
     if not bands_raw:
-        raise ValueError("Invalid --theta_bands. Provide e.g. '4-8 4-10' or '4 8 4 10'.")
+        raise ValueError(f"Invalid {arg_name}. Provide e.g. '4-8 4-10' or '4 8 4 10'.")
 
     out: list[tuple[str, tuple[float, float]]] = []
     seen: set[tuple[float, float]] = set()
@@ -1072,15 +1116,19 @@ def _parse_theta_bands(tokens: list[str] | tuple[str, ...] | None) -> list[tuple
         lo_f = float(lo)
         hi_f = float(hi)
         if lo_f >= hi_f:
-            raise ValueError(f"Invalid theta band: [{lo_f}, {hi_f}] (must satisfy low < high).")
+            raise ValueError(f"Invalid {arg_name} band: [{lo_f}, {hi_f}] (must satisfy low < high).")
         if lo_f < 0:
-            raise ValueError(f"Invalid theta band: [{lo_f}, {hi_f}] (low must be >= 0).")
+            raise ValueError(f"Invalid {arg_name} band: [{lo_f}, {hi_f}] (low must be >= 0).")
         key = (lo_f, hi_f)
         if key in seen:
             continue
         seen.add(key)
         out.append((f"{_fmt_freq(lo_f)}-{_fmt_freq(hi_f)}", (lo_f, hi_f)))
     return out
+
+
+def _parse_theta_bands(tokens: list[str] | tuple[str, ...] | None) -> list[tuple[str, tuple[float, float]]]:
+    return _parse_freq_bands(tokens, "--theta_bands")
 
 
 def _parse_time_range_for_timeseries(
@@ -2338,6 +2386,7 @@ def _compute_granger_gpdc_summary_pair(
     p_max: int,
     criterion: str,
     order_mode: str,
+    fixed_order: int,
     fmin: float,
     fmax: float,
     n_freqs: int,
@@ -2377,6 +2426,9 @@ def _compute_granger_gpdc_summary_pair(
     mode = str(order_mode).strip().lower()
     if mode not in {"median", "per_window"}:
         mode = "median"
+    fixed_p = int(max(0, int(fixed_order)))
+    if fixed_p > 0:
+        mode = "fixed"
     n_windows_total = int(len(indices))
     use_epoch_progress = bool(progress_epoch) and (n_windows_total > 0)
     label = str(progress_label).strip() if progress_label is not None else ""
@@ -2453,7 +2505,23 @@ def _compute_granger_gpdc_summary_pair(
     gpdc_windows: list[np.ndarray] = []
     selected_orders: list[int] = []
 
-    if mode == "per_window":
+    if mode == "fixed":
+        p_fixed = int(fixed_p)
+
+        def _fixed_worker(idx: np.ndarray) -> np.ndarray | None:
+            return _gpdc_fixed_order_worker(idx, p_fixed)
+
+        for gpdc_one in _iter_windows(
+            _epoch_map(indices, _fixed_worker),
+            f"fit_p={p_fixed}",
+        ):
+            if gpdc_one is None:
+                continue
+            gpdc_windows.append(np.asarray(gpdc_one, dtype=np.float32))
+        if not gpdc_windows:
+            return None
+        selected_orders = [int(p_fixed)] * int(len(gpdc_windows))
+    elif mode == "per_window":
         def _per_window_worker(idx: np.ndarray) -> tuple[np.ndarray, int] | None:
             p_sel = _select_order_worker(idx)
             if p_sel is None:
@@ -2529,6 +2597,7 @@ def _compute_granger_cell_for_entry(
     granger_order_max: int,
     granger_order_criterion: str,
     granger_order_mode: str,
+    granger_fixed_order: int,
     granger_fmin: float,
     granger_fmax: float,
     granger_n_freqs: int,
@@ -2574,6 +2643,7 @@ def _compute_granger_cell_for_entry(
         p_max=int(granger_order_max),
         criterion=str(granger_order_criterion),
         order_mode=str(granger_order_mode),
+        fixed_order=int(granger_fixed_order),
         fmin=float(granger_fmin),
         fmax=float(granger_fmax),
         n_freqs=int(granger_n_freqs),
@@ -2606,7 +2676,7 @@ def _compute_granger_cell_for_entry(
         "order_min": int(np.min(orders)),
         "order_max": int(np.max(orders)),
         "order_criterion": str(granger_order_criterion).strip().lower(),
-        "order_mode": str(granger_order_mode).strip().lower(),
+        "order_mode": "fixed" if int(granger_fixed_order) > 0 else str(granger_order_mode).strip().lower(),
         "timing_sec": {
             "prepare_pair": float(t_after_pair - t_start),
             "granger_core": float(t_after_summary - t_after_pair),
@@ -2626,6 +2696,7 @@ def _build_granger_mode_cells(
     granger_order_max: int,
     granger_order_criterion: str,
     granger_order_mode: str,
+    granger_fixed_order: int,
     granger_fmin: float,
     granger_epoch_jobs: int,
     granger_progress: str,
@@ -2649,8 +2720,11 @@ def _build_granger_mode_cells(
         print("-- granger progress=epoch: forcing entry-level n_jobs to 1 for readable sub-progress bars")
         n_jobs_eff = 1
 
-    order_mode_l = str(granger_order_mode).strip().lower()
+    fixed_order_i = int(max(0, int(granger_fixed_order)))
+    order_mode_l = "fixed" if fixed_order_i > 0 else str(granger_order_mode).strip().lower()
     pass_multiplier = 1 if order_mode_l == "per_window" else 2
+    if order_mode_l == "fixed":
+        pass_multiplier = 1
 
     def _estimate_entry_window_ops(entry: EEGEntry) -> int:
         if not entry.ms_units:
@@ -2706,6 +2780,7 @@ def _build_granger_mode_cells(
         tf_step_sec=tf_step_sec,
         granger_order_max=granger_order_max,
         granger_order_mode=granger_order_mode,
+        granger_fixed_order=fixed_order_i,
         granger_order_criterion=granger_order_criterion,
         granger_epoch_jobs=granger_epoch_jobs,
         granger_progress=progress_mode,
@@ -4473,6 +4548,12 @@ def _build_subject_granger_figure(
                 range=[float(x_min), float(x_max)],
                 title_text=(x_title if is_bottom else None),
                 showgrid=True,
+                minor={
+                    "dtick": 10,
+                    "showgrid": True,
+                    "gridcolor": "rgba(120,120,120,0.18)",
+                    "gridwidth": 0.5,
+                },
                 zeroline=False,
                 showticklabels=True,
                 row=row_idx,
@@ -4517,6 +4598,351 @@ def _build_subject_granger_figure(
         hovermode="x",
     )
     return fig
+
+
+def _finite_mean(values: list[float]) -> float:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return float("nan")
+    return float(np.mean(arr))
+
+
+def _wilcoxon_greater_p(values: np.ndarray) -> float:
+    vals = np.asarray(values, dtype=float).reshape(-1)
+    vals = vals[np.isfinite(vals)]
+    if vals.size < 2 or np.allclose(vals, 0.0):
+        return float("nan")
+    try:
+        return float(wilcoxon(vals, alternative="greater", zero_method="wilcox").pvalue)
+    except ValueError:
+        return float("nan")
+
+
+def _interp_to_ref(freq: np.ndarray, y: np.ndarray, freq_ref: np.ndarray) -> np.ndarray:
+    f = np.asarray(freq, dtype=float).reshape(-1)
+    yy = np.asarray(y, dtype=float).reshape(-1)
+    fr = np.asarray(freq_ref, dtype=float).reshape(-1)
+    n = min(f.size, yy.size)
+    if n < 2 or fr.size == 0:
+        return np.full(fr.size, np.nan, dtype=float)
+    f = f[:n]
+    yy = yy[:n]
+    m = np.isfinite(f) & np.isfinite(yy)
+    if int(np.sum(m)) < 2:
+        return np.full(fr.size, np.nan, dtype=float)
+    f = f[m]
+    yy = yy[m]
+    order = np.argsort(f)
+    f = f[order]
+    yy = yy[order]
+    f_u, idx_u = np.unique(f, return_index=True)
+    yy_u = yy[idx_u]
+    if f_u.size < 2:
+        return np.full(fr.size, np.nan, dtype=float)
+    return np.interp(fr, f_u, yy_u, left=np.nan, right=np.nan)
+
+
+def _collect_granger_group_stats(
+    mode_cells: list[ModeCell],
+    bands: list[tuple[str, tuple[float, float]]],
+) -> dict[str, Any] | None:
+    records: list[dict[str, Any]] = []
+    curve_by_subject: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
+    freq_ref: np.ndarray | None = None
+
+    for cell in mode_cells:
+        payload = cell.payload if isinstance(cell.payload, dict) else None
+        if payload is None:
+            continue
+        freq = np.asarray(payload.get("freq_hz", np.array([], dtype=float)), dtype=float).reshape(-1)
+        gpdc = np.asarray(payload.get("gpdc_mean", np.array([], dtype=float)), dtype=float)
+        if freq.size < 2 or gpdc.shape != (2, 2, freq.size):
+            continue
+        ms_to_hc = np.asarray(gpdc[0, 1, :], dtype=float).reshape(-1)
+        hc_to_ms = np.asarray(gpdc[1, 0, :], dtype=float).reshape(-1)
+        if freq_ref is None:
+            freq_ref = freq.copy()
+        ms_curve = _interp_to_ref(freq, ms_to_hc, freq_ref)
+        hc_curve = _interp_to_ref(freq, hc_to_ms, freq_ref)
+        curve_by_subject.setdefault(cell.subject, []).append((ms_curve, hc_curve))
+
+        for band_label, (fmin, fmax) in bands:
+            m_band = (freq >= float(fmin)) & (freq <= float(fmax))
+            m_band &= np.isfinite(ms_to_hc) & np.isfinite(hc_to_ms)
+            if int(np.sum(m_band)) < 1:
+                continue
+            f_b = freq[m_band]
+            ms_b = ms_to_hc[m_band]
+            hc_b = hc_to_ms[m_band]
+            ms_mean = float(np.nanmean(ms_b))
+            hc_mean = float(np.nanmean(hc_b))
+            denom = ms_mean + hc_mean + 1e-12
+            di = float((ms_mean - hc_mean) / denom)
+            if f_b.size >= 2:
+                ms_auc = float(np.trapz(ms_b, f_b))
+                hc_auc = float(np.trapz(hc_b, f_b))
+            else:
+                width = float(fmax) - float(fmin)
+                ms_auc = float(ms_mean * width)
+                hc_auc = float(hc_mean * width)
+            peak_idx = int(np.nanargmax(ms_b))
+            records.append(
+                {
+                    "subject": cell.subject,
+                    "session": cell.session,
+                    "band": band_label,
+                    "ms_to_hc_mean": ms_mean,
+                    "hc_to_ms_mean": hc_mean,
+                    "ms_to_hc_auc": ms_auc,
+                    "hc_to_ms_auc": hc_auc,
+                    "di": di,
+                    "ms_to_hc_peak_freq": float(f_b[peak_idx]),
+                    "ms_to_hc_peak_value": float(ms_b[peak_idx]),
+                }
+            )
+
+    if not records or freq_ref is None:
+        return None
+
+    subjects = sorted({r["subject"] for r in records}, key=natural_key)
+    subject_band_rows: list[dict[str, Any]] = []
+    for subject in subjects:
+        for band_label, _ in bands:
+            rr = [r for r in records if r["subject"] == subject and r["band"] == band_label]
+            if not rr:
+                continue
+            sessions = sorted({str(r["session"]) for r in rr}, key=natural_key)
+            subject_band_rows.append(
+                {
+                    "subject": subject,
+                    "band": band_label,
+                    "n_sessions": len(sessions),
+                    "ms_to_hc_mean": _finite_mean([float(r["ms_to_hc_mean"]) for r in rr]),
+                    "hc_to_ms_mean": _finite_mean([float(r["hc_to_ms_mean"]) for r in rr]),
+                    "ms_to_hc_auc": _finite_mean([float(r["ms_to_hc_auc"]) for r in rr]),
+                    "hc_to_ms_auc": _finite_mean([float(r["hc_to_ms_auc"]) for r in rr]),
+                    "di": _finite_mean([float(r["di"]) for r in rr]),
+                    "ms_to_hc_peak_freq": _finite_mean([float(r["ms_to_hc_peak_freq"]) for r in rr]),
+                    "ms_to_hc_peak_value": _finite_mean([float(r["ms_to_hc_peak_value"]) for r in rr]),
+                }
+            )
+
+    subject_curves: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for subject, curves in curve_by_subject.items():
+        if not curves:
+            continue
+        ms_stack = np.stack([c[0] for c in curves], axis=0)
+        hc_stack = np.stack([c[1] for c in curves], axis=0)
+        subject_curves[subject] = (np.nanmean(ms_stack, axis=0), np.nanmean(hc_stack, axis=0))
+
+    summary_rows: list[dict[str, Any]] = []
+    for band_label, _ in bands:
+        subj_rows = [r for r in subject_band_rows if r["band"] == band_label]
+        sess_rows = [r for r in records if r["band"] == band_label]
+        if not subj_rows:
+            continue
+        di_vals = np.asarray([float(r["di"]) for r in subj_rows], dtype=float)
+        di_vals = di_vals[np.isfinite(di_vals)]
+        peak_vals = np.asarray([float(r["ms_to_hc_peak_freq"]) for r in subj_rows], dtype=float)
+        peak_vals = peak_vals[np.isfinite(peak_vals)]
+        if di_vals.size == 0:
+            continue
+        q1, med, q3 = np.percentile(di_vals, [25, 50, 75])
+        p_greater = _wilcoxon_greater_p(di_vals)
+        summary_rows.append(
+            {
+                "band": band_label,
+                "n_subjects": int(di_vals.size),
+                "n_sessions": int(len(sess_rows)),
+                "median_di": float(med),
+                "iqr_low": float(q1),
+                "iqr_high": float(q3),
+                "p_di_gt_0": p_greater,
+                "n_di_positive": int(np.sum(di_vals > 0)),
+                "median_peak_freq": float(np.nanmedian(peak_vals)) if peak_vals.size else float("nan"),
+            }
+        )
+
+    return {
+        "records": records,
+        "subject_band_rows": subject_band_rows,
+        "subject_curves": subject_curves,
+        "freq_ref": freq_ref,
+        "summary_rows": summary_rows,
+    }
+
+
+def _write_granger_stats_pdf(
+    mode_cells: list[ModeCell],
+    bands: list[tuple[str, tuple[float, float]]],
+    out_path: Path,
+    run_name: str,
+) -> bool:
+    stats = _collect_granger_group_stats(mode_cells, bands)
+    if stats is None:
+        print("\033[1;33m -- Granger stats PDF skipped: no plottable granger data.\033[0m")
+        return False
+
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    freq_ref = np.asarray(stats["freq_ref"], dtype=float)
+    subject_curves = stats["subject_curves"]
+    subject_band_rows = stats["subject_band_rows"]
+    summary_rows = stats["summary_rows"]
+
+    with PdfPages(out_path) as pdf:
+        if subject_curves:
+            subjects = sorted(subject_curves.keys(), key=natural_key)
+            ms_stack = np.stack([subject_curves[s][0] for s in subjects], axis=0)
+            hc_stack = np.stack([subject_curves[s][1] for s in subjects], axis=0)
+            fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
+            for ax, stack, title, color in (
+                (axes[0], ms_stack, "MS -> HC", "#d62728"),
+                (axes[1], hc_stack, "HC -> MS", "#2ca02c"),
+            ):
+                for row in stack:
+                    ax.plot(freq_ref, row, color="0.75", linewidth=0.7, alpha=0.45)
+                mean = np.nanmean(stack, axis=0)
+                n_eff = np.sum(np.isfinite(stack), axis=0)
+                sem = np.full(mean.size, np.nan, dtype=float)
+                ok = n_eff > 1
+                sem[ok] = np.nanstd(stack[:, ok], axis=0, ddof=1) / np.sqrt(n_eff[ok])
+                ax.plot(freq_ref, mean, color=color, linewidth=2.0)
+                ax.fill_between(freq_ref, mean - sem, mean + sem, color=color, alpha=0.18, linewidth=0)
+                ax.set_ylabel("gPDC")
+                ax.set_title(title)
+                ax.set_ylim(0, max(1.0, float(np.nanmax(mean + np.nan_to_num(sem, nan=0.0))) * 1.1))
+                ax.grid(True, which="major", alpha=0.35)
+                ax.grid(True, which="minor", alpha=0.18)
+                ax.xaxis.set_minor_locator(plt.MultipleLocator(10))
+            axes[-1].set_xlabel("Frequency (Hz)")
+            fig.suptitle(f"{run_name} | Granger gPDC subject-averaged curves", fontsize=13)
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+            pdf.savefig(fig)
+            plt.close(fig)
+
+        band_labels = [row["band"] for row in summary_rows]
+        if band_labels:
+            di_data = [
+                np.asarray(
+                    [
+                        float(r["di"])
+                        for r in subject_band_rows
+                        if r["band"] == band and np.isfinite(float(r["di"]))
+                    ],
+                    dtype=float,
+                )
+                for band in band_labels
+            ]
+            fig, ax = plt.subplots(figsize=(11, 6.5))
+            ax.axhline(0, color="0.25", linewidth=1.0)
+            ax.boxplot(di_data, labels=band_labels, showfliers=False)
+            rng = np.random.default_rng(0)
+            for i, vals in enumerate(di_data, start=1):
+                if vals.size == 0:
+                    continue
+                x = i + rng.uniform(-0.12, 0.12, size=vals.size)
+                ax.scatter(x, vals, s=28, color="#d62728", alpha=0.75, edgecolor="white", linewidth=0.4)
+            p_txt = []
+            for row in summary_rows:
+                p = float(row["p_di_gt_0"])
+                if np.isfinite(p):
+                    p_txt.append(f"{row['band']}: p={p:.3g}")
+            ax.set_title("Band directionality index across subjects\nDI=(MS->HC - HC->MS)/(MS->HC + HC->MS)")
+            ax.set_ylabel("Subject-mean DI")
+            ax.grid(True, axis="y", alpha=0.3)
+            ax.text(
+                0.01,
+                0.99,
+                "Wilcoxon signed-rank, one-sided DI > 0\n" + "\n".join(p_txt),
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=8,
+                bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "0.85"},
+            )
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+            peak_data = [
+                np.asarray(
+                    [
+                        float(r["ms_to_hc_peak_freq"])
+                        for r in subject_band_rows
+                        if r["band"] == band and np.isfinite(float(r["ms_to_hc_peak_freq"]))
+                    ],
+                    dtype=float,
+                )
+                for band in band_labels
+            ]
+            fig, ax = plt.subplots(figsize=(11, 6.5))
+            ax.boxplot(peak_data, labels=band_labels, showfliers=False)
+            for i, vals in enumerate(peak_data, start=1):
+                if vals.size == 0:
+                    continue
+                x = i + rng.uniform(-0.12, 0.12, size=vals.size)
+                ax.scatter(x, vals, s=28, color="#1f77b4", alpha=0.75, edgecolor="white", linewidth=0.4)
+            ax.set_title("MS -> HC peak frequency by band, subject-averaged across sessions")
+            ax.set_ylabel("Peak frequency (Hz)")
+            ax.grid(True, axis="y", alpha=0.3)
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+            table_rows = []
+            for row in summary_rows:
+                p = float(row["p_di_gt_0"])
+                table_rows.append(
+                    [
+                        row["band"],
+                        str(int(row["n_subjects"])),
+                        str(int(row["n_sessions"])),
+                        f"{float(row['median_di']):.3f}",
+                        f"{float(row['iqr_low']):.3f}..{float(row['iqr_high']):.3f}",
+                        f"{p:.3g}" if np.isfinite(p) else "NA",
+                        f"{int(row['n_di_positive'])}/{int(row['n_subjects'])}",
+                        f"{float(row['median_peak_freq']):.1f}" if np.isfinite(float(row["median_peak_freq"])) else "NA",
+                    ]
+                )
+            fig, ax = plt.subplots(figsize=(11, 6.5))
+            ax.axis("off")
+            ax.set_title(
+                f"{run_name} | Granger band statistics\n"
+                "Session metrics are averaged within subject before inference.",
+                fontsize=12,
+                pad=16,
+            )
+            table = ax.table(
+                cellText=table_rows,
+                colLabels=[
+                    "Band",
+                    "N subj",
+                    "N sess",
+                    "Median DI",
+                    "IQR DI",
+                    "p DI>0",
+                    "DI>0",
+                    "Median peak Hz",
+                ],
+                loc="center",
+                cellLoc="center",
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(8)
+            table.scale(1.0, 1.45)
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    print(f"-- saved Granger stats PDF: {out_path}")
+    return True
 
 
 def _inject_reset_listener(html_text: str) -> str:
@@ -5945,6 +6371,8 @@ def main_code(args: argparse.Namespace) -> None:
         raise ValueError("--granger_n_freqs must be >= 16.")
     if int(args.granger_order_max) < 1:
         raise ValueError("--granger_order_max must be >= 1.")
+    if int(args.granger_fixed_order) < 0:
+        raise ValueError("--granger_fixed_order must be >= 0.")
 
     apply_line_noise_removal = _parse_bool_text(
         getattr(args, "APPLY_LINE_NOISE_REMOVAL", "true"),
@@ -5984,6 +6412,7 @@ def main_code(args: argparse.Namespace) -> None:
         return
 
     theta_bands = _parse_theta_bands(args.theta_bands)
+    granger_stats_bands = _parse_freq_bands(args.granger_stats_bands, "--granger_stats_bands")
     ts_range = _parse_time_range_for_timeseries(modes, args.time_range)
     smooth_win_sec = _parse_smooth_window_sec(args.ts_smooth_win_sec)
     include_plotlyjs = _resolve_plotly_js_mode(args)
@@ -6148,6 +6577,7 @@ def main_code(args: argparse.Namespace) -> None:
             f"freq={granger_freq_min_req:g}-{granger_freq_max_eff:g}Hz, "
             f"n_freqs={int(args.granger_n_freqs)}, "
             f"order_max={int(args.granger_order_max)}, "
+            f"fixed_order={int(args.granger_fixed_order)}, "
             f"criterion={granger_order_criterion}, "
             f"order_mode={granger_order_mode}, "
             f"epoch_jobs={granger_epoch_jobs}, progress={granger_progress}"
@@ -6425,6 +6855,7 @@ def main_code(args: argparse.Namespace) -> None:
             analysis_sampling_rate=analysis_sampling_rate,
             spike_sampling_rate=float(args.sampling_rate),
             granger_order_mode=granger_order_mode,
+            granger_fixed_order=int(args.granger_fixed_order),
             time_range=ts_range,
             tf_win_sec=float(args.tf_win_sec),
             tf_step_sec=float(args.tf_step_sec),
@@ -6543,6 +6974,23 @@ def main_code(args: argparse.Namespace) -> None:
         print("-- mode failures:")
         for m in mode_failures:
             print(f"   - {m}")
+
+    if "granger" in modes and mode_cells.get("granger"):
+        raw_stats_pdf = str(args.granger_stats_pdf).strip()
+        if raw_stats_pdf.lower() not in {"", "none", "false", "off", "0"}:
+            if raw_stats_pdf.upper() == "AUTO":
+                granger_stats_pdf = output_html.parent / f"granger_stats_{sanitize_token(dataset_dir.name)}.pdf"
+            else:
+                granger_stats_pdf = Path(raw_stats_pdf).expanduser().resolve()
+            try:
+                _write_granger_stats_pdf(
+                    mode_cells=mode_cells["granger"],
+                    bands=granger_stats_bands,
+                    out_path=granger_stats_pdf,
+                    run_name=dataset_dir.name,
+                )
+            except Exception as exc:
+                print(f"\033[1;33m -- Granger stats PDF skipped: {exc}\033[0m")
 
     if not mode_pages:
         print("\033[1;31m -- no mode pages generated; parent HTML not written.\033[0m")

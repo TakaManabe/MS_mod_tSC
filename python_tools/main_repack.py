@@ -5,15 +5,16 @@ Repackage dataset files into a subject-level hierarchy.
 Target layout:
   Subject layout:
     <output_root>/<dataset>/<subject>/
-      s<session>_HC_<label>.mat
+      s<session>_HC_<label>.mat  (one or more)
       s<session>_MS_spike.mat
   Subject-less layout:
     <output_root>/<dataset>/
-      s<session>_HC_<label>.mat
+      s<session>_HC_<label>.mat  (one or more)
       s<session>_MS_spike.mat
 
 The script keeps directory depth at dataset/subject and encodes session/region
-in filenames. TT*.mat unit files are merged per session into one MS file.
+in filenames. HC LFP files are normalized to include an ``eegx`` variable.
+TT*.mat unit files are merged per session into one MS file.
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def parse_args() -> argparse.Namespace:
         "--link-mode",
         choices=("symlink", "hardlink", "copy"),
         default="copy",
-        help="Deprecated: HC/Position files are always copied.",
+        help="Deprecated: HC files are normalized and Position files are copied.",
     )
     p.add_argument(
         "--ms-format",
@@ -132,22 +133,61 @@ def list_dirs(path: Path) -> List[Path]:
 
 
 def has_relevant_session_data(session_dir: Path) -> bool:
-    for f in session_dir.iterdir():
+    search_dirs = [session_dir]
+    raw_dir = session_dir / "raw"
+    if raw_dir.is_dir():
+        search_dirs.append(raw_dir)
+
+    for parent in search_dirs:
+        for f in parent.iterdir():
+            if not f.is_file():
+                continue
+            nm = f.name
+            if is_hidden_name(nm):
+                continue
+            low = nm.lower()
+            if low == "position.mat":
+                return True
+            if parent == session_dir and TT_RE.match(nm):
+                return True
+            if low.endswith(".mat") and EEG_RE.match(nm):
+                return True
+            if low.endswith(".mat") and any(tok in low for tok in REGION_TOKENS):
+                return True
+    return False
+
+
+def iter_hc_search_dirs(session_dir: Path) -> List[Path]:
+    """Return locations that may contain HC LFP files for one session."""
+    out = [session_dir]
+    raw_dir = session_dir / "raw"
+    if raw_dir.is_dir():
+        out.append(raw_dir)
+    return out
+
+
+def iter_hc_files(session_dir: Path) -> List[Path]:
+    hc_files: List[Path] = []
+    for parent in iter_hc_search_dirs(session_dir):
+        for f in sorted(parent.iterdir(), key=lambda x: x.name.lower()):
+            if not f.is_file():
+                continue
+            nm = f.name
+            if is_hidden_name(nm):
+                continue
+            if is_hc_file(nm):
+                hc_files.append(f)
+    return hc_files
+
+
+def iter_direct_session_files(session_dir: Path) -> Iterable[Path]:
+    for f in sorted(session_dir.iterdir(), key=lambda x: x.name.lower()):
         if not f.is_file():
             continue
         nm = f.name
         if is_hidden_name(nm):
             continue
-        low = nm.lower()
-        if low == "position.mat":
-            return True
-        if TT_RE.match(nm):
-            return True
-        if low.endswith(".mat") and EEG_RE.match(nm):
-            return True
-        if low.endswith(".mat") and any(tok in low for tok in REGION_TOKENS):
-            return True
-    return False
+        yield f
 
 
 def discover_datasets(input_root: Path, selected: Sequence[str]) -> List[Path]:
@@ -218,39 +258,18 @@ def hc_source_label(name: str) -> str:
     return sanitize_token(Path(name).stem)
 
 
-def pick_hc_file(hc_files: Sequence[Path]) -> Optional[Path]:
-    if not hc_files:
-        return None
-    eeg_candidates: List[Tuple[int, Path]] = []
-    for p in hc_files:
-        m = EEG_RE.match(p.name)
-        if m:
-            eeg_candidates.append((int(m.group("ch")), p))
-    if eeg_candidates:
-        eeg_candidates.sort(key=lambda x: (x[0], x[1].name.lower()))
-        return eeg_candidates[0][1]
-    return sorted(hc_files, key=lambda p: p.name.lower())[0]
-
-
 def gather_session_files(session_dir: Path) -> Tuple[List[Path], List[Path], Optional[Path]]:
-    hc_files: List[Path] = []
+    hc_files = iter_hc_files(session_dir)
     tt_files: List[Path] = []
     position_file: Optional[Path] = None
 
-    for f in sorted(session_dir.iterdir(), key=lambda x: x.name.lower()):
-        if not f.is_file():
-            continue
+    for f in iter_direct_session_files(session_dir):
         nm = f.name
-        if is_hidden_name(nm):
-            continue
         if TT_RE.match(nm):
             tt_files.append(f)
             continue
         if nm.lower() == "position.mat":
             position_file = f
-            continue
-        if is_hc_file(nm):
-            hc_files.append(f)
 
     return hc_files, tt_files, position_file
 
@@ -294,11 +313,88 @@ def materialize_file(
     return "copied"
 
 
+def _read_mat_variables(path: Path) -> Dict[str, Any]:
+    try:
+        mat = loadmat(str(path), squeeze_me=False, struct_as_record=False)
+        return {k: v for k, v in mat.items() if not k.startswith("__")}
+    except NotImplementedError:
+        pass
+
+    out: Dict[str, Any] = {}
+    with h5py.File(path, "r") as f:
+        for key in f.keys():
+            obj = f[key]
+            if isinstance(obj, h5py.Dataset):
+                out[key] = np.asarray(obj)
+    if out:
+        return out
+    raise ValueError(f"No loadable MATLAB variables found in HC file: {path}")
+
+
+def _numeric_vector_from_value(val: Any) -> Optional[np.ndarray]:
+    if not isinstance(val, np.ndarray):
+        return None
+    if not np.issubdtype(val.dtype, np.number):
+        return None
+    arr = np.asarray(val)
+    if arr.size == 0:
+        return None
+    return arr
+
+
+def choose_hc_lfp_variable(data: Dict[str, Any]) -> Tuple[str, np.ndarray]:
+    preferred = ("eegx", "fieldPot", "fieldpot", "eeg", "lfp")
+    lower_to_key = {str(k).lower(): k for k in data.keys() if not str(k).startswith("__")}
+
+    for name in preferred:
+        key = lower_to_key.get(name.lower())
+        if key is None:
+            continue
+        arr = _numeric_vector_from_value(data[key])
+        if arr is not None:
+            return key, arr
+
+    for key, val in data.items():
+        if str(key).startswith("__"):
+            continue
+        arr = _numeric_vector_from_value(val)
+        if arr is not None:
+            return str(key), arr
+
+    raise ValueError("No numeric HC LFP variable found.")
+
+
+def materialize_hc_file(
+    src: Path,
+    dst: Path,
+    overwrite: bool,
+    dry_run: bool,
+) -> Tuple[str, str]:
+    if dst.exists() or dst.is_symlink():
+        if not overwrite:
+            return "skip_exists", ""
+        if not dry_run:
+            safe_unlink(dst)
+
+    if dry_run:
+        return "dry_run", ""
+
+    data = _read_mat_variables(src)
+    source_var, lfp = choose_hc_lfp_variable(data)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    out_data = dict(data)
+    out_data["eegx"] = np.asarray(lfp).reshape(-1, 1)
+    out_data["source_lfp_variable"] = np.array([source_var], dtype=object)
+    savemat(dst, out_data, do_compression=True)
+    return "saved", source_var
+
+
 def resolve_copy_mode(requested_mode: str) -> str:
     if requested_mode != "copy":
         print(
             "[info] --link-mode is deprecated. "
-            f"Requested '{requested_mode}', but HC/Position files are always copied."
+            f"Requested '{requested_mode}', but HC files are normalized and Position files are copied."
         )
     return "copy"
 
@@ -520,20 +616,34 @@ def run(args: argparse.Namespace) -> None:
                 hc_files, tt_files, position_file = gather_session_files(sess_dir)
                 session_tok = sanitize_token(session)
 
-                hc_path = pick_hc_file(hc_files)
-                if hc_path is not None:
+                for hc_path in hc_files:
                     src_label = sanitize_token(hc_source_label(hc_path.name))
                     out_name = f"s{session_tok}_HC_{src_label}.mat"
                     out_path = ensure_unique_path(out_dir / out_name, used_out_names)
-                    status = materialize_file(
-                        src=hc_path,
-                        dst=out_path,
-                        mode=file_mode,
-                        overwrite=args.overwrite,
-                        dry_run=args.dry_run,
-                    )
-                    if status != "skip_exists":
+                    source_var = ""
+                    try:
+                        status, source_var = materialize_hc_file(
+                            src=hc_path,
+                            dst=out_path,
+                            overwrite=args.overwrite,
+                            dry_run=args.dry_run,
+                        )
+                    except Exception as exc:
+                        status = "hc_error"
+                        source_var = ""
+                        if args.verbose:
+                            subject_label = subject_for_manifest if subject_for_manifest else "-"
+                            print(
+                                f"[warn] {dataset}/{subject_label}/{session}: "
+                                f"failed to normalize HC {hc_path.name}: {exc}"
+                            )
+                    if status not in {"skip_exists", "hc_error"}:
                         stats["hc"] += 1
+                    detail_parts = [f"hc_candidates={len(hc_files)}"]
+                    if hc_path.parent != sess_dir:
+                        detail_parts.append(f"source_subdir={hc_path.parent.relative_to(sess_dir)}")
+                    if source_var:
+                        detail_parts.append(f"source_var={source_var}")
                     manifest_rows.append(
                         {
                             "dataset": dataset,
@@ -543,11 +653,7 @@ def run(args: argparse.Namespace) -> None:
                             "source_path": str(hc_path),
                             "dest_path": str(out_path),
                             "status": status,
-                            "details": (
-                                f"hc_candidates={len(hc_files)};selected={hc_path.name}"
-                                if len(hc_files) > 1
-                                else ""
-                            ),
+                            "details": ";".join(detail_parts),
                             "n_units": "",
                         }
                     )
