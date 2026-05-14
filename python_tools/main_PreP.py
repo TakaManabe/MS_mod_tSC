@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -46,7 +47,9 @@ SUPPORTED_MODES = (
     "entropy_td",
     "signal",
     "hilbert",
+    "spectrogram",
     "phaselag",
+    "syncfc",
     "coherence_band",
     "pearson",
     "coherence",
@@ -59,7 +62,9 @@ TIME_SERIES_MODES = {
     "entropy_td",
     "signal",
     "hilbert",
+    "spectrogram",
     "phaselag",
+    "syncfc",
     "coherence_band",
     "pearson",
     "coherence",
@@ -79,7 +84,9 @@ MODE_TITLE_MAP = {
     "entropy_td": "Entropy TD Balance",
     "signal": "Signal",
     "hilbert": "Hilbert",
+    "spectrogram": "Spectrogram",
     "phaselag": "PhaseLag",
+    "syncfc": "SyncFC",
     "coherence_band": "Coherence Band",
     "pearson": "Pearson Band",
     "coherence": "Coherence",
@@ -93,7 +100,9 @@ MODE_SHORT_TITLE_MAP = {
     "entropy_td": "Entropy TD",
     "signal": "Signal",
     "hilbert": "Hilbert",
+    "spectrogram": "Spectrogram",
     "phaselag": "PhaseLag",
+    "syncfc": "SyncFC",
     "coherence_band": "CohBand",
     "pearson": "Pearson",
     "coherence": "Coherence",
@@ -104,24 +113,41 @@ MODE_ALIASES = {
     "hilbertphase": "phaselag",
     "zshift": "phaselag",
     "zlag": "phaselag",
+    "fc": "syncfc",
+    "functionalconnectivity": "syncfc",
+    "synchrony": "syncfc",
+    "synchronyfc": "syncfc",
+    "wavelet": "spectrogram",
 }
 DEFAULT_THETA_BAND_TOKENS = [
+    "1-4", 
+    "4-8",
     "4-12",
-    "12-30",
-    "35-55",
-    "65-85",
-    "90-115",
-    "120-145",
-    "165-185",
+    "8-12",
+    "8-30",
+    "12-30"
+    # "4-12",
+    # "12-30",
+    # "35-55",
+    # "65-85",
+    # "90-115",
+    # "120-145",
+    # "165-185",
 ]
 DEFAULT_GRANGER_STATS_BAND_TOKENS = [
+    "1-4", 
+    "4-8",
     "4-12",
-    "12-30",
-    "35-55",
-    "65-85",
-    "90-115",
-    "120-145",
-    "165-185",
+    "8-12",
+    "8-30",
+    "12-30"
+    # "4-12",
+    # "12-30",
+    # "35-55",
+    # "65-85",
+    # "90-115",
+    # "120-145",
+    # "165-185",
 ]
 DELTA_BAND = (1.0, 4.0)
 PLOTLY_COLORS = [
@@ -328,6 +354,13 @@ class ModePage:
     href: str
 
 
+@dataclass(frozen=True)
+class StatsPage:
+    key: str
+    title: str
+    href: str
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -358,7 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Analysis modes to run. Supported: "
             "psd theta_power theta_delta_ratio entropy entropy_td signal hilbert "
-            "phaselag coherence_band pearson coherence granger. "
+            "spectrogram phaselag syncfc coherence_band pearson coherence granger. "
             "Aliases: HilPhase/ZShift -> phaselag. "
             "If omitted, all implemented modes are executed."
         ),
@@ -371,8 +404,72 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_THETA_BAND_TOKENS,
         help=(
             "Theta bands for signal/hilbert/theta_power/theta_delta_ratio/entropy/entropy_td/"
-            "phaselag/coherence_band/pearson. "
+            "phaselag/syncfc/coherence_band/pearson. "
             "Formats: '4-8 4-10' or flat list '4 8 4 10'."
+        ),
+    )
+    parser.add_argument(
+        "--spectrogram_normalize",
+        choices=("mean", "none"),
+        default="mean",
+        help=(
+            "Wavelet spectrogram normalization. 'mean' shows dB relative to each "
+            "signal's mean wavelet power at each frequency; 'none' shows raw dB power. "
+            "Default: mean."
+        ),
+    )
+    parser.add_argument(
+        "--spectrogram_aperiodic_mode",
+        choices=("residual", "none"),
+        default="residual",
+        help=(
+            "Spectrogram aperiodic handling across frequency for each time window. "
+            "'residual' removes a linear 1/f trend in log10(freq); 'none' keeps dB power. "
+            "Default: residual."
+        ),
+    )
+    parser.add_argument(
+        "--syncfc_n_surrogates",
+        type=int,
+        default=50,
+        help=(
+            "Number of SyncFC null permutations/surrogates. "
+            "Use 0 to disable null-normalized statistics. Default: 50."
+        ),
+    )
+    parser.add_argument(
+        "--syncfc_null",
+        choices=("window_shuffle", "circular_shift", "none"),
+        default="window_shuffle",
+        help=(
+            "Null model for SyncFC statistics. 'window_shuffle' pairs HC and MS "
+            "windows from different times within the same session; 'circular_shift' "
+            "uses the previous whole-trace shift surrogate; 'none' disables null "
+            "statistics. Default: window_shuffle."
+        ),
+    )
+    parser.add_argument(
+        "--syncfc_min_shift_sec",
+        type=float,
+        default=2.0,
+        help=(
+            "Minimum circular shift in seconds for SyncFC surrogates. "
+            "This avoids near-zero shifts that preserve local synchrony. Default: 2.0."
+        ),
+    )
+    parser.add_argument(
+        "--syncfc_seed",
+        type=int,
+        default=0,
+        help="Random seed for SyncFC null permutations/surrogates. Default: 0.",
+    )
+    parser.add_argument(
+        "--syncfc_stats_pdf",
+        type=str,
+        default="AUTO",
+        help=(
+            "Output PDF path for group-level SyncFC statistics. Use AUTO to save next "
+            "to the parent HTML, or NONE to disable. Default: AUTO."
         ),
     )
     parser.add_argument(
@@ -427,6 +524,23 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Minimum fraction of usable PhaseLag windows required to keep a band/session. "
             "Bands below this value are hidden. Default: 0.1."
+        ),
+    )
+    parser.add_argument(
+        "--phaselag_include_edge_peaks",
+        action="store_true",
+        help=(
+            "Include PhaseLag windows whose best lag is at the edge of the searched lag range. "
+            "Default behavior excludes edge-hit windows from best-lag probability."
+        ),
+    )
+    parser.add_argument(
+        "--phaselag_edge_guard_bins",
+        type=int,
+        default=0,
+        help=(
+            "Extra number of lag bins inside each search edge to exclude from PhaseLag "
+            "best-lag probability. 0 excludes only the exact endpoints. Default: 0."
         ),
     )
     parser.add_argument(
@@ -599,13 +713,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--tf_win_sec",
         type=float,
         default=1.0,
-        help="Sliding window length (sec) for theta/coherence/pearson/granger family modes.",
+        help="Sliding window length (sec) for spectrogram/theta/syncfc/coherence/pearson/granger family modes.",
     )
     parser.add_argument(
         "--tf_step_sec",
         type=float,
         default=1.0,
-        help="Sliding window step (sec) for theta/coherence/pearson/granger family modes.",
+        help="Sliding window step (sec) for spectrogram/theta/syncfc/coherence/pearson/granger family modes.",
     )
     parser.add_argument(
         "--freq_plot",
@@ -614,8 +728,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("FMIN", "FMAX"),
         default=[1.5, 10.0],
         help=(
-            "Frequency range [Hz] displayed/aggregated in coherence mode "
-            "(wavelet coherence/PLV). Default: 1.5 10."
+            "Frequency range [Hz] displayed/aggregated in spectrogram/coherence modes "
+            "(wavelet power/coherence/PLV). Default: 1.5 10."
         ),
     )
     parser.add_argument(
@@ -625,7 +739,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("FMIN", "FMAX"),
         default=[1.0, 15.0],
         help=(
-            "Wavelet frequency calculation range [Hz] for coherence mode. "
+            "Wavelet frequency calculation range [Hz] for spectrogram/coherence modes. "
             "Default: 1 15."
         ),
     )
@@ -773,6 +887,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Output parent index HTML path. Default: "
             "<dataset_dir>/interactive_analysis_index_<dataset>.html"
+        ),
+    )
+    parser.add_argument(
+        "--stats-html",
+        "--stats_html",
+        dest="stats_html",
+        type=str,
+        default="AUTO",
+        help=(
+            "Output tabbed Plotly HTML for group-level Granger/PhaseLag/SyncFC statistics. "
+            "Use AUTO to save next to the parent HTML, or NONE to disable. Default: AUTO."
         ),
     )
     return parser
@@ -1088,7 +1213,8 @@ def _normalize_modes(modes_raw: list[str] | None) -> list[str]:
         if x not in SUPPORTED_MODES:
             raise ValueError(
                 f"Unsupported mode: {x}. Supported: {', '.join(SUPPORTED_MODES)}. "
-                "Aliases: hilphase, zshift, zlag -> phaselag."
+                "Aliases: hilphase, zshift, zlag -> phaselag; "
+                "fc, synchrony -> syncfc; wavelet -> spectrogram."
             )
         if x not in req:
             req.append(x)
@@ -1251,6 +1377,18 @@ def _downsample_xy(x: np.ndarray, y: np.ndarray, max_points: int) -> tuple[np.nd
         y = y[:n]
     idx = _linspace_idx(x.size, max_points)
     return x[idx], y[idx]
+
+
+def _downsample_heatmap_time(t: np.ndarray, z: np.ndarray, max_points: int) -> tuple[np.ndarray, np.ndarray]:
+    tt = np.asarray(t, dtype=float).reshape(-1)
+    zz = np.asarray(z, dtype=float)
+    if zz.ndim != 2 or tt.size == 0:
+        return tt, zz
+    n = min(tt.size, zz.shape[1])
+    tt = tt[:n]
+    zz = zz[:, :n]
+    idx = _linspace_idx(n, max_points)
+    return tt[idx], zz[:, idx]
 
 
 def _clip_signal_by_time_range(sig: np.ndarray, sr: float, time_range: tuple[float, float] | None) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1825,6 +1963,454 @@ def _compute_coherence_band_timeseries_pair(
     return time_centers.astype(np.float32), coh_out, plv_out
 
 
+def _stable_seed_u32(*parts: Any) -> int:
+    h = hashlib.blake2b(digest_size=8)
+    for part in parts:
+        h.update(str(part).encode("utf-8", errors="replace"))
+        h.update(b"\0")
+    return int.from_bytes(h.digest(), byteorder="little", signed=False) & 0xFFFFFFFF
+
+
+def _windowed_sync_metrics_from_analytic(
+    x_h: np.ndarray,
+    y_h: np.ndarray,
+    t_points: np.ndarray,
+    time_centers: np.ndarray,
+    win_sec: float,
+    min_samples: int = 3,
+) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(x_h, dtype=np.complex128).reshape(-1)
+    y = np.asarray(y_h, dtype=np.complex128).reshape(-1)
+    t = np.asarray(t_points, dtype=float).reshape(-1)
+    centers = np.asarray(time_centers, dtype=float).reshape(-1)
+    n = min(x.size, y.size, t.size)
+    coh = np.full(centers.size, np.nan, dtype=np.float32)
+    plv = np.full(centers.size, np.nan, dtype=np.float32)
+    if n < int(min_samples) or centers.size == 0:
+        return coh, plv
+    x = x[:n]
+    y = y[:n]
+    t = t[:n]
+
+    amp_x = np.abs(x)
+    amp_y = np.abs(y)
+    cross = x * np.conjugate(y)
+    pxx = amp_x * amp_x
+    pyy = amp_y * amp_y
+    ok = (
+        np.isfinite(cross.real)
+        & np.isfinite(cross.imag)
+        & np.isfinite(pxx)
+        & np.isfinite(pyy)
+        & (pxx > 0.0)
+        & (pyy > 0.0)
+    )
+
+    cross_clean = np.where(ok, cross, 0.0 + 0.0j)
+    pxx_clean = np.where(ok, pxx, 0.0)
+    pyy_clean = np.where(ok, pyy, 0.0)
+    unit = np.zeros(n, dtype=np.complex128)
+    unit[ok] = (x[ok] / amp_x[ok]) * np.conjugate(y[ok] / amp_y[ok])
+
+    if not np.any(np.diff(t) < 0):
+        left = np.searchsorted(t, centers - float(win_sec), side="left").astype(np.int64)
+        right = np.searchsorted(t, centers, side="right").astype(np.int64)
+
+        c_cross = np.empty(n + 1, dtype=np.complex128)
+        c_cross[0] = 0.0 + 0.0j
+        c_cross[1:] = np.cumsum(cross_clean, dtype=np.complex128)
+        c_pxx = np.empty(n + 1, dtype=float)
+        c_pxx[0] = 0.0
+        c_pxx[1:] = np.cumsum(pxx_clean, dtype=float)
+        c_pyy = np.empty(n + 1, dtype=float)
+        c_pyy[0] = 0.0
+        c_pyy[1:] = np.cumsum(pyy_clean, dtype=float)
+        c_unit = np.empty(n + 1, dtype=np.complex128)
+        c_unit[0] = 0.0 + 0.0j
+        c_unit[1:] = np.cumsum(unit, dtype=np.complex128)
+        c_count = np.empty(n + 1, dtype=np.int64)
+        c_count[0] = 0
+        c_count[1:] = np.cumsum(ok, dtype=np.int64)
+
+        counts = c_count[right] - c_count[left]
+        valid = counts >= int(min_samples)
+        if np.any(valid):
+            sum_cross = c_cross[right[valid]] - c_cross[left[valid]]
+            sum_pxx = c_pxx[right[valid]] - c_pxx[left[valid]]
+            sum_pyy = c_pyy[right[valid]] - c_pyy[left[valid]]
+            denom = sum_pxx * sum_pyy
+            coh_vals = np.full(sum_cross.size, np.nan, dtype=float)
+            good = denom > 0.0
+            coh_vals[good] = (np.abs(sum_cross[good]) ** 2) / denom[good]
+            coh[valid] = np.asarray(np.clip(coh_vals, 0.0, 1.0), dtype=np.float32)
+
+            sum_unit = c_unit[right[valid]] - c_unit[left[valid]]
+            plv[valid] = np.asarray(
+                np.clip(np.abs(sum_unit) / counts[valid], 0.0, 1.0),
+                dtype=np.float32,
+            )
+        return coh, plv
+
+    indices = _causal_window_indices(t, centers, win_sec=win_sec)
+    for i, idx in enumerate(indices):
+        if idx.size < int(min_samples):
+            continue
+        idx_ok = idx[ok[idx]]
+        if idx_ok.size < int(min_samples):
+            continue
+        sx = float(np.sum(pxx_clean[idx_ok]))
+        sy = float(np.sum(pyy_clean[idx_ok]))
+        if sx > 0.0 and sy > 0.0:
+            sc = np.sum(cross_clean[idx_ok])
+            coh[i] = np.float32(np.clip((np.abs(sc) ** 2) / (sx * sy), 0.0, 1.0))
+        su = np.sum(unit[idx_ok])
+        plv[i] = np.float32(np.clip(np.abs(su) / float(idx_ok.size), 0.0, 1.0))
+    return coh, plv
+
+
+def _syncfc_surrogate_shifts(
+    n_samples: int,
+    n_surrogates: int,
+    min_shift_samples: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    n = int(n_samples)
+    ns = int(max(0, n_surrogates))
+    if ns <= 0 or n < 4:
+        return np.zeros(0, dtype=np.int64)
+    min_shift = int(max(1, min(int(min_shift_samples), n // 2)))
+    max_shift = int(n - min_shift)
+    if max_shift < min_shift:
+        return np.full(ns, max(1, n // 2), dtype=np.int64)
+    return rng.integers(min_shift, max_shift + 1, size=ns, dtype=np.int64)
+
+
+def _syncfc_pair_metrics_from_indices(
+    x_h: np.ndarray,
+    y_h: np.ndarray,
+    idx_x: np.ndarray,
+    idx_y: np.ndarray,
+    min_samples: int = 3,
+) -> tuple[float, float]:
+    x = np.asarray(x_h, dtype=np.complex128).reshape(-1)
+    y = np.asarray(y_h, dtype=np.complex128).reshape(-1)
+    ix = np.asarray(idx_x, dtype=np.int64).reshape(-1)
+    iy = np.asarray(idx_y, dtype=np.int64).reshape(-1)
+    m = int(min(ix.size, iy.size))
+    if m < int(min_samples):
+        return float("nan"), float("nan")
+    sx = x[ix[:m]]
+    sy = y[iy[:m]]
+    ax = np.abs(sx)
+    ay = np.abs(sy)
+    ok = (
+        np.isfinite(sx.real)
+        & np.isfinite(sx.imag)
+        & np.isfinite(sy.real)
+        & np.isfinite(sy.imag)
+        & np.isfinite(ax)
+        & np.isfinite(ay)
+        & (ax > 0.0)
+        & (ay > 0.0)
+    )
+    if int(np.sum(ok)) < int(min_samples):
+        return float("nan"), float("nan")
+    sx = sx[ok]
+    sy = sy[ok]
+    ax = ax[ok]
+    ay = ay[ok]
+    pxx = float(np.sum(ax * ax))
+    pyy = float(np.sum(ay * ay))
+    coh = float("nan")
+    if pxx > 0.0 and pyy > 0.0:
+        cross = np.sum(sx * np.conjugate(sy))
+        coh = float(np.clip((np.abs(cross) ** 2) / (pxx * pyy), 0.0, 1.0))
+    unit = (sx / ax) * np.conjugate(sy / ay)
+    plv = float(np.clip(np.abs(np.mean(unit)), 0.0, 1.0))
+    return coh, plv
+
+
+def _deranged_window_permutation(indices: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    base = np.asarray(indices, dtype=np.int64).reshape(-1)
+    if base.size < 2:
+        return np.zeros(0, dtype=np.int64)
+    for _ in range(32):
+        perm = rng.permutation(base)
+        if not np.any(perm == base):
+            return perm.astype(np.int64, copy=False)
+    shift = int(rng.integers(1, int(base.size)))
+    return np.roll(base, shift).astype(np.int64, copy=False)
+
+
+def _sample_values_for_plot(
+    values: np.ndarray,
+    max_values: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    vals = np.asarray(values, dtype=np.float32).reshape(-1)
+    vals = vals[np.isfinite(vals)]
+    n_max = int(max(0, max_values))
+    if n_max > 0 and vals.size > n_max:
+        keep = rng.choice(vals.size, size=n_max, replace=False)
+        vals = vals[np.sort(keep)]
+    return vals.astype(np.float32, copy=False)
+
+
+def _syncfc_window_shuffle_surrogates(
+    x_h: np.ndarray,
+    y_h: np.ndarray,
+    t_points: np.ndarray,
+    time_centers: np.ndarray,
+    win_sec: float,
+    n_surrogates: int,
+    rng: np.random.Generator,
+    valid_mask: np.ndarray | None = None,
+    min_samples: int = 3,
+    max_plot_values: int = 5000,
+) -> dict[str, Any]:
+    ns = int(max(0, n_surrogates))
+    empty = {
+        "coh_medians": np.zeros(0, dtype=np.float32),
+        "plv_medians": np.zeros(0, dtype=np.float32),
+        "coh_plot": np.zeros(0, dtype=np.float32),
+        "plv_plot": np.zeros(0, dtype=np.float32),
+        "n_pairs": 0,
+    }
+    if ns <= 0:
+        return empty
+
+    centers = np.asarray(time_centers, dtype=float).reshape(-1)
+    indices = _causal_window_indices(np.asarray(t_points, dtype=float), centers, win_sec=float(win_sec))
+    if not indices:
+        return empty
+    valid = np.asarray([idx.size >= int(min_samples) for idx in indices], dtype=bool)
+    if valid_mask is not None:
+        mask = np.asarray(valid_mask, dtype=bool).reshape(-1)
+        n_mask = min(valid.size, mask.size)
+        valid[:n_mask] &= mask[:n_mask]
+        if n_mask < valid.size:
+            valid[n_mask:] = False
+    valid_idx = np.where(valid)[0].astype(np.int64)
+    if valid_idx.size < 2:
+        return empty
+
+    coh_medians: list[float] = []
+    plv_medians: list[float] = []
+    coh_plot_values: list[float] = []
+    plv_plot_values: list[float] = []
+    for _ in range(ns):
+        shuffled_idx = _deranged_window_permutation(valid_idx, rng)
+        if shuffled_idx.size != valid_idx.size:
+            continue
+        coh_perm = np.full(valid_idx.size, np.nan, dtype=np.float32)
+        plv_perm = np.full(valid_idx.size, np.nan, dtype=np.float32)
+        for k, (i_win, j_win) in enumerate(zip(valid_idx, shuffled_idx)):
+            coh, plv = _syncfc_pair_metrics_from_indices(
+                x_h=x_h,
+                y_h=y_h,
+                idx_x=indices[int(i_win)],
+                idx_y=indices[int(j_win)],
+                min_samples=min_samples,
+            )
+            coh_perm[k] = np.float32(coh)
+            plv_perm[k] = np.float32(plv)
+        coh_f = coh_perm[np.isfinite(coh_perm)]
+        plv_f = plv_perm[np.isfinite(plv_perm)]
+        if coh_f.size:
+            coh_medians.append(float(np.nanmedian(coh_f)))
+            coh_plot_values.extend(float(v) for v in coh_f)
+        if plv_f.size:
+            plv_medians.append(float(np.nanmedian(plv_f)))
+            plv_plot_values.extend(float(v) for v in plv_f)
+
+    return {
+        "coh_medians": np.asarray(coh_medians, dtype=np.float32),
+        "plv_medians": np.asarray(plv_medians, dtype=np.float32),
+        "coh_plot": _sample_values_for_plot(np.asarray(coh_plot_values, dtype=np.float32), max_plot_values, rng),
+        "plv_plot": _sample_values_for_plot(np.asarray(plv_plot_values, dtype=np.float32), max_plot_values, rng),
+        "n_pairs": int(valid_idx.size),
+    }
+
+
+def _metric_surrogate_summary(real_values: np.ndarray, surrogate_medians: np.ndarray) -> dict[str, float]:
+    real = np.asarray(real_values, dtype=float).reshape(-1)
+    real = real[np.isfinite(real)]
+    real_median = float(np.nanmedian(real)) if real.size else float("nan")
+    surr = np.asarray(surrogate_medians, dtype=float).reshape(-1)
+    surr = surr[np.isfinite(surr)]
+    if surr.size == 0:
+        return {
+            "real_median": real_median,
+            "surrogate_mean": float("nan"),
+            "surrogate_sd": float("nan"),
+            "surrogate_z": float("nan"),
+            "surrogate_p": float("nan"),
+        }
+    s_mean = float(np.mean(surr))
+    s_sd = float(np.std(surr, ddof=1)) if surr.size > 1 else float("nan")
+    z = float("nan")
+    if np.isfinite(real_median) and np.isfinite(s_sd) and s_sd > 0.0:
+        z = float((real_median - s_mean) / s_sd)
+    p = float((1 + int(np.sum(surr >= real_median))) / (surr.size + 1)) if np.isfinite(real_median) else float("nan")
+    return {
+        "real_median": real_median,
+        "surrogate_mean": s_mean,
+        "surrogate_sd": s_sd,
+        "surrogate_z": z,
+        "surrogate_p": p,
+    }
+
+
+def _compute_syncfc_band_timeseries_pair(
+    x_sig: np.ndarray,
+    y_sig: np.ndarray,
+    t_points: np.ndarray,
+    sr: float,
+    win_sec: float,
+    step_sec: float,
+    bands: list[tuple[str, tuple[float, float]]],
+    n_surrogates: int,
+    min_shift_sec: float,
+    seed: int,
+    null_mode: str = "window_shuffle",
+) -> tuple[np.ndarray, dict[str, dict[str, Any]]]:
+    x = np.asarray(x_sig, dtype=float).reshape(-1)
+    y = np.asarray(y_sig, dtype=float).reshape(-1)
+    t = np.asarray(t_points, dtype=float).reshape(-1)
+    n = min(x.size, y.size, t.size)
+    if n < 2:
+        return np.array([], dtype=np.float32), {}
+    x = x[:n]
+    y = y[:n]
+    t = t[:n]
+
+    time_centers = _build_time_right(float(t[0]), float(t[-1]), step_sec)
+    if time_centers.size == 0:
+        return np.array([], dtype=np.float32), {}
+
+    out: dict[str, dict[str, Any]] = {}
+    sr_f = float(sr)
+    nyq = sr_f / 2.0
+    min_shift_samples = int(round(max(0.0, float(min_shift_sec)) * sr_f))
+    null_mode_s = str(null_mode).strip().lower()
+    if null_mode_s not in {"window_shuffle", "circular_shift", "none"}:
+        null_mode_s = "window_shuffle"
+
+    for label, (fmin, fmax) in bands:
+        fmin_f = float(fmin)
+        fmax_f = float(fmax)
+        if fmin_f <= 0 or fmax_f <= 0 or fmin_f >= fmax_f or fmax_f >= nyq:
+            print(
+                f"\033[1;33m -- SyncFC: skipping invalid band "
+                f"{label} [{fmin_f:g}, {fmax_f:g}] for sr={sr_f:g}Hz\033[0m"
+            )
+            continue
+
+        sos = butter(4, [fmin_f, fmax_f], btype="bandpass", fs=sr_f, output="sos")
+        x_f = sosfiltfilt(sos, x)
+        y_f = sosfiltfilt(sos, y)
+        x_h = hilbert(x_f)
+        y_h = hilbert(y_f)
+
+        coh_vals, plv_vals = _windowed_sync_metrics_from_analytic(
+            x_h=x_h,
+            y_h=y_h,
+            t_points=t,
+            time_centers=time_centers,
+            win_sec=float(win_sec),
+        )
+        valid = np.isfinite(coh_vals) | np.isfinite(plv_vals)
+        if not np.any(valid):
+            continue
+
+        surr_coh_medians: list[float] = []
+        surr_plv_medians: list[float] = []
+        null_coh_plot = np.zeros(0, dtype=np.float32)
+        null_plv_plot = np.zeros(0, dtype=np.float32)
+        n_null = 0
+        shifts = np.zeros(0, dtype=np.int64)
+        if int(n_surrogates) > 0 and null_mode_s == "window_shuffle":
+            rng = np.random.default_rng(_stable_seed_u32(seed, "window_shuffle", label, fmin_f, fmax_f))
+            null = _syncfc_window_shuffle_surrogates(
+                x_h=x_h,
+                y_h=y_h,
+                t_points=t,
+                time_centers=time_centers,
+                win_sec=float(win_sec),
+                n_surrogates=int(n_surrogates),
+                rng=rng,
+                valid_mask=valid,
+                max_plot_values=5000,
+            )
+            surr_coh_medians = [float(v) for v in np.asarray(null["coh_medians"], dtype=float)]
+            surr_plv_medians = [float(v) for v in np.asarray(null["plv_medians"], dtype=float)]
+            null_coh_plot = np.asarray(null["coh_plot"], dtype=np.float32)
+            null_plv_plot = np.asarray(null["plv_plot"], dtype=np.float32)
+            n_null = int(max(len(surr_coh_medians), len(surr_plv_medians)))
+        elif int(n_surrogates) > 0 and null_mode_s == "circular_shift":
+            rng = np.random.default_rng(_stable_seed_u32(seed, label, fmin_f, fmax_f))
+            shifts = _syncfc_surrogate_shifts(
+                n_samples=n,
+                n_surrogates=int(n_surrogates),
+                min_shift_samples=min_shift_samples,
+                rng=rng,
+            )
+            coh_plot_values: list[float] = []
+            plv_plot_values: list[float] = []
+            for shift in shifts:
+                y_shift = np.roll(y_h, int(shift))
+                coh_s, plv_s = _windowed_sync_metrics_from_analytic(
+                    x_h=x_h,
+                    y_h=y_shift,
+                    t_points=t,
+                    time_centers=time_centers,
+                    win_sec=float(win_sec),
+                )
+                coh_s_f = coh_s[np.isfinite(coh_s)]
+                plv_s_f = plv_s[np.isfinite(plv_s)]
+                if coh_s_f.size:
+                    surr_coh_medians.append(float(np.nanmedian(coh_s_f)))
+                    coh_plot_values.extend(float(v) for v in coh_s_f)
+                if plv_s_f.size:
+                    surr_plv_medians.append(float(np.nanmedian(plv_s_f)))
+                    plv_plot_values.extend(float(v) for v in plv_s_f)
+            null_coh_plot = _sample_values_for_plot(np.asarray(coh_plot_values, dtype=np.float32), 5000, rng)
+            null_plv_plot = _sample_values_for_plot(np.asarray(plv_plot_values, dtype=np.float32), 5000, rng)
+            n_null = int(shifts.size)
+
+        coh_summary = _metric_surrogate_summary(coh_vals, np.asarray(surr_coh_medians, dtype=float))
+        plv_summary = _metric_surrogate_summary(plv_vals, np.asarray(surr_plv_medians, dtype=float))
+        median_coh = float(coh_summary["real_median"])
+        median_plv = float(plv_summary["real_median"])
+        surrogate_mean_coh = float(coh_summary["surrogate_mean"])
+        surrogate_mean_plv = float(plv_summary["surrogate_mean"])
+        out[str(label)] = {
+            "band": (fmin_f, fmax_f),
+            "coh": np.asarray(coh_vals, dtype=np.float32),
+            "plv": np.asarray(plv_vals, dtype=np.float32),
+            "null_coh": np.asarray(null_coh_plot, dtype=np.float32),
+            "null_plv": np.asarray(null_plv_plot, dtype=np.float32),
+            "n_windows": int(np.sum(valid)),
+            "n_total_windows": int(time_centers.size),
+            "n_surrogates": int(n_null),
+            "null_mode": null_mode_s,
+            "median_coh": median_coh,
+            "median_plv": median_plv,
+            "surrogate_mean_coh": surrogate_mean_coh,
+            "surrogate_sd_coh": float(coh_summary["surrogate_sd"]),
+            "z_coh": float(coh_summary["surrogate_z"]),
+            "p_coh": float(coh_summary["surrogate_p"]),
+            "surrogate_mean_plv": surrogate_mean_plv,
+            "surrogate_sd_plv": float(plv_summary["surrogate_sd"]),
+            "z_plv": float(plv_summary["surrogate_z"]),
+            "p_plv": float(plv_summary["surrogate_p"]),
+            "delta_coh": median_coh - surrogate_mean_coh if np.isfinite(median_coh) and np.isfinite(surrogate_mean_coh) else float("nan"),
+            "delta_plv": median_plv - surrogate_mean_plv if np.isfinite(median_plv) and np.isfinite(surrogate_mean_plv) else float("nan"),
+        }
+
+    return time_centers.astype(np.float32), out
+
+
 def _filter_phaselag_z_matrix(
     z_matrix: np.ndarray,
     count_matrix: np.ndarray,
@@ -1832,6 +2418,8 @@ def _filter_phaselag_z_matrix(
     min_plv: float,
     min_peak_delta_z: float,
     min_peak_delta_frac: float,
+    exclude_edge_peaks: bool,
+    edge_guard_bins: int,
 ) -> dict[str, np.ndarray]:
     z = np.asarray(z_matrix, dtype=float)
     counts = np.asarray(count_matrix, dtype=float)
@@ -1842,19 +2430,25 @@ def _filter_phaselag_z_matrix(
             "best_z": np.zeros(0, dtype=float),
             "best_plv": np.zeros(0, dtype=float),
             "second_z": np.zeros(0, dtype=float),
+            "edge_hit": np.zeros(0, dtype=bool),
         }
 
     n_win = int(z.shape[0])
+    n_lags = int(z.shape[1])
     keep = np.zeros(n_win, dtype=bool)
     best_idx = np.full(n_win, -1, dtype=np.int64)
     best_z = np.full(n_win, np.nan, dtype=float)
     best_plv = np.full(n_win, np.nan, dtype=float)
     second_z = np.full(n_win, np.nan, dtype=float)
+    edge_hit = np.zeros(n_win, dtype=bool)
 
     min_z_f = float(max(0.0, min_z))
     min_plv_f = float(max(0.0, min_plv))
     min_peak_delta_z_f = float(max(0.0, min_peak_delta_z))
     min_peak_delta_frac_f = float(max(0.0, min_peak_delta_frac))
+    edge_guard = int(max(0, edge_guard_bins))
+    if n_lags > 0:
+        edge_guard = int(min(edge_guard, max(0, (n_lags - 1) // 2)))
 
     for wi in range(n_win):
         row = np.asarray(z[wi], dtype=float)
@@ -1873,8 +2467,11 @@ def _filter_phaselag_z_matrix(
         row_second[bi] = -np.inf
         sz = float(np.max(row_second)) if np.any(np.isfinite(row_second)) else np.nan
         plv = float(np.sqrt(max(0.0, bz / c)))
+        is_edge_hit = bool(bi <= edge_guard or bi >= (n_lags - 1 - edge_guard))
 
         good = True
+        if bool(exclude_edge_peaks) and is_edge_hit:
+            good = False
         if min_z_f > 0.0 and bz < min_z_f:
             good = False
         if good and min_plv_f > 0.0 and plv < min_plv_f:
@@ -1892,6 +2489,7 @@ def _filter_phaselag_z_matrix(
         best_z[wi] = bz
         best_plv[wi] = plv
         second_z[wi] = sz
+        edge_hit[wi] = is_edge_hit
         keep[wi] = bool(good)
 
     return {
@@ -1900,6 +2498,7 @@ def _filter_phaselag_z_matrix(
         "best_z": best_z,
         "best_plv": best_plv,
         "second_z": second_z,
+        "edge_hit": edge_hit,
     }
 
 
@@ -1916,6 +2515,8 @@ def _compute_phaselag_summary_pair(
     min_peak_delta_z: float,
     min_peak_delta_frac: float,
     min_valid_ratio: float,
+    exclude_edge_peaks: bool,
+    edge_guard_bins: int,
 ) -> dict[str, dict[str, Any]]:
     x = np.asarray(x_sig, dtype=float).reshape(-1)
     y = np.asarray(y_sig, dtype=float).reshape(-1)
@@ -2070,11 +2671,14 @@ def _compute_phaselag_summary_pair(
             min_plv=min_plv,
             min_peak_delta_z=min_peak_delta_z,
             min_peak_delta_frac=min_peak_delta_frac,
+            exclude_edge_peaks=exclude_edge_peaks,
+            edge_guard_bins=edge_guard_bins,
         )
         keep = np.asarray(filt["keep"], dtype=bool)
         best_idx = np.asarray(filt["best_idx"], dtype=np.int64)
         best_z = np.asarray(filt["best_z"], dtype=float)
         best_plv = np.asarray(filt["best_plv"], dtype=float)
+        edge_hit = np.asarray(filt["edge_hit"], dtype=bool)
         n_valid = int(np.sum(keep))
         if n_valid <= 0:
             continue
@@ -2114,8 +2718,11 @@ def _compute_phaselag_summary_pair(
             "hist_prob": np.asarray(hist_prob, dtype=np.float32),
             "n_total_windows": int(n_total),
             "n_valid_windows": int(n_valid),
+            "n_edge_hit_windows": int(np.sum(edge_hit)),
             "valid_ratio": valid_ratio,
             "min_valid_ratio": float(min_valid_ratio),
+            "exclude_edge_peaks": bool(exclude_edge_peaks),
+            "edge_guard_bins": int(max(0, edge_guard_bins)),
             "lag_selection_score": "rayleigh_z",
             "peak_lag_ms": float(lag_ms[peak_lag_idx]),
             "mode_lag_ms": float(lag_ms[mode_lag_idx]),
@@ -2290,6 +2897,138 @@ def _compute_wavelet_coupling_maps_pair(
     plv_sel = np.asarray(np.clip(plv_full[m_band, :], 0.0, 1.0), dtype=np.float32)
     t_sel = np.asarray(time_centers, dtype=np.float32)
     return f_sel, t_sel, coh_sel, plv_sel
+
+
+def _remove_aperiodic_trend_tf(tf_map: np.ndarray, freqs_hz: np.ndarray) -> np.ndarray:
+    z = np.asarray(tf_map, dtype=float)
+    f = np.asarray(freqs_hz, dtype=float).reshape(-1)
+    if z.ndim != 2 or f.size != z.shape[0] or f.size < 3:
+        return z
+    m_f = np.isfinite(f) & (f > 0.0)
+    if int(np.sum(m_f)) < 3:
+        return z
+    out = z.copy()
+    log_f = np.log10(f[m_f])
+    X = np.vstack([log_f, np.ones_like(log_f)]).T
+    for ti in range(out.shape[1]):
+        y = out[m_f, ti]
+        m_y = np.isfinite(y)
+        if int(np.sum(m_y)) < 3:
+            continue
+        beta, _, _, _ = np.linalg.lstsq(X[m_y], y[m_y], rcond=None)
+        out[m_f, ti] = y - (X @ beta)
+    return out
+
+
+def _compute_wavelet_power_maps_pair(
+    x_sig: np.ndarray,
+    y_sig: np.ndarray,
+    t_points: np.ndarray,
+    sr: float,
+    win_sec: float,
+    step_sec: float,
+    fmin_plot: float,
+    fmax_plot: float,
+    fmin_calc: float,
+    fmax_calc: float,
+    normalize: str,
+    aperiodic_mode: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, float]] | None:
+    x = np.asarray(x_sig, dtype=float).reshape(-1)
+    y = np.asarray(y_sig, dtype=float).reshape(-1)
+    t = np.asarray(t_points, dtype=float).reshape(-1)
+    n = min(x.size, y.size, t.size)
+    if n < 8:
+        return None
+    x = x[:n]
+    y = y[:n]
+    t = t[:n]
+
+    sr_f = float(sr)
+    if sr_f <= 0:
+        return None
+    fmin_wave = max(1e-6, float(fmin_calc))
+    fmax_wave = float(fmax_calc)
+    if fmax_wave <= fmin_wave:
+        return None
+
+    n_freqs = max(60, int(np.ceil(np.log2(fmax_wave / fmin_wave)) * 24))
+    f_points = np.geomspace(fmin_wave, fmax_wave, num=n_freqs)
+    w = 12.0
+    widths = (w * sr_f) / (2.0 * np.pi * f_points)
+
+    time_centers = _build_time_right(float(t[0]), float(t[-1]), step_sec)
+    if time_centers.size == 0:
+        return None
+    win_indices = _causal_window_indices(t, time_centers, win_sec=win_sec)
+    hc_full = np.full((n_freqs, time_centers.size), np.nan, dtype=np.float32)
+    ms_full = np.full((n_freqs, time_centers.size), np.nan, dtype=np.float32)
+
+    norm_mode = str(normalize).strip().lower()
+    if norm_mode not in {"mean", "none"}:
+        norm_mode = "mean"
+
+    def _morlet2(M: int, s: float, w_: float) -> np.ndarray:
+        tt = np.arange(-M // 2, M // 2 + M % 2, dtype=np.float64)
+        return np.exp(1j * w_ * (tt / s)) * np.exp(-(tt**2) / (2.0 * (s**2)))
+
+    eps = 1e-8
+    for fi, s in enumerate(widths):
+        M = int(np.ceil(10 * s)) * 2 + 1
+        M = min(M, 2 * n + 1)
+        if M < 3:
+            M = 3
+        try:
+            psi = signal.morlet2(M, s, w=w)
+        except Exception:
+            psi = _morlet2(M, s, w)
+
+        wx = signal.fftconvolve(x, psi, mode="same")
+        wy = signal.fftconvolve(y, psi, mode="same")
+        px = np.asarray(np.abs(wx) ** 2, dtype=float)
+        py = np.asarray(np.abs(wy) ** 2, dtype=float)
+        if norm_mode == "mean":
+            mx = float(np.nanmean(px))
+            my = float(np.nanmean(py))
+            px_db = 10.0 * (np.log10(px + eps) - np.log10(mx + eps))
+            py_db = 10.0 * (np.log10(py + eps) - np.log10(my + eps))
+        else:
+            px_db = 10.0 * np.log10(px + eps)
+            py_db = 10.0 * np.log10(py + eps)
+
+        for ti, idx in enumerate(win_indices):
+            if idx.size < 2:
+                continue
+            hc_full[fi, ti] = np.float32(np.nanmedian(px_db[idx]))
+            ms_full[fi, ti] = np.float32(np.nanmedian(py_db[idx]))
+
+    m_band = (f_points >= float(fmin_plot)) & (f_points <= float(fmax_plot))
+    if not np.any(m_band):
+        return None
+
+    f_sel = np.asarray(f_points[m_band], dtype=np.float32)
+    hc_sel = np.asarray(hc_full[m_band, :], dtype=np.float32)
+    ms_sel = np.asarray(ms_full[m_band, :], dtype=np.float32)
+    if str(aperiodic_mode).strip().lower() == "residual":
+        hc_sel = np.asarray(_remove_aperiodic_trend_tf(hc_sel, f_sel), dtype=np.float32)
+        ms_sel = np.asarray(_remove_aperiodic_trend_tf(ms_sel, f_sel), dtype=np.float32)
+    diff_sel = np.asarray(ms_sel - hc_sel, dtype=np.float32)
+
+    m = np.isfinite(hc_sel) & np.isfinite(ms_sel)
+    corr = float("nan")
+    mae = float("nan")
+    if int(np.sum(m)) >= 3:
+        a = hc_sel[m].astype(float)
+        b = ms_sel[m].astype(float)
+        if float(np.nanstd(a)) > 0.0 and float(np.nanstd(b)) > 0.0:
+            corr = float(np.corrcoef(a, b)[0, 1])
+        mae = float(np.nanmean(np.abs(b - a)))
+
+    metrics = {
+        "map_corr": corr,
+        "mean_abs_diff_db": mae,
+    }
+    return f_sel, np.asarray(time_centers, dtype=np.float32), hc_sel, ms_sel, diff_sel, metrics
 
 
 def _fit_bivariate_mvar_ols(
@@ -3085,6 +3824,164 @@ def _build_coherence_band_mode_cells(
     return out
 
 
+def _compute_syncfc_cell_for_entry(
+    entry: EEGEntry,
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    theta_bands: list[tuple[str, tuple[float, float]]],
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    smooth_win_sec: float | None,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+    syncfc_n_surrogates: int,
+    syncfc_null: str,
+    syncfc_min_shift_sec: float,
+    syncfc_seed: int,
+) -> ModeCell | None:
+    pair = _prepare_hc_pseudo_pair(
+        entry=entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        time_range=time_range,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+    )
+    if pair is None:
+        return None
+    t_sig, x_sig, y_sig = pair
+
+    t_out, band_stats = _compute_syncfc_band_timeseries_pair(
+        x_sig=x_sig,
+        y_sig=y_sig,
+        t_points=t_sig,
+        sr=float(analysis_sampling_rate),
+        win_sec=float(tf_win_sec),
+        step_sec=float(tf_step_sec),
+        bands=theta_bands,
+        n_surrogates=int(syncfc_n_surrogates),
+        min_shift_sec=float(syncfc_min_shift_sec),
+        seed=_stable_seed_u32(syncfc_seed, entry.subject, entry.session),
+        null_mode=str(syncfc_null),
+    )
+    if t_out.size < 2 or not band_stats:
+        return None
+
+    coh_traces: list[TraceSpec] = []
+    plv_traces: list[TraceSpec] = []
+    for bidx, (band_label, _) in enumerate(theta_bands):
+        st = band_stats.get(str(band_label))
+        if not isinstance(st, dict):
+            continue
+        color = PLOTLY_COLORS[bidx % len(PLOTLY_COLORS)]
+
+        y_coh = st.get("coh")
+        if y_coh is not None:
+            yy = _smooth_by_time(np.asarray(y_coh, dtype=float), t_out, smooth_win_sec)
+            xx, yy = _downsample_xy(t_out, yy, max_points=max_points)
+            coh_traces.append(
+                TraceSpec(
+                    name=band_label,
+                    x=xx,
+                    y=yy,
+                    color=color,
+                    width=1.2,
+                    dash="solid",
+                )
+            )
+
+        y_plv = st.get("plv")
+        if y_plv is not None:
+            yy = _smooth_by_time(np.asarray(y_plv, dtype=float), t_out, smooth_win_sec)
+            xx, yy = _downsample_xy(t_out, yy, max_points=max_points)
+            plv_traces.append(
+                TraceSpec(
+                    name=band_label,
+                    x=xx,
+                    y=yy,
+                    color=color,
+                    width=1.2,
+                    dash="solid",
+                )
+            )
+
+    if not coh_traces and not plv_traces:
+        return None
+    payload = {
+        "primary_panel_label": "Coh",
+        "secondary_panel_label": "PLV",
+        "secondary_traces": tuple(plv_traces),
+        "time_sec": np.asarray(t_out, dtype=np.float32),
+        "band_stats": band_stats,
+    }
+    return ModeCell(subject=entry.subject, session=entry.session, traces=tuple(coh_traces), payload=payload)
+
+
+def _build_syncfc_mode_cells(
+    eeg_entries: list[EEGEntry],
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    theta_bands: list[tuple[str, tuple[float, float]]],
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    smooth_win_sec: float | None,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+    syncfc_n_surrogates: int,
+    syncfc_null: str,
+    syncfc_min_shift_sec: float,
+    syncfc_seed: int,
+    n_jobs: int,
+) -> list[ModeCell]:
+    out: list[ModeCell] = []
+    worker = partial(
+        _compute_syncfc_cell_for_entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        theta_bands=theta_bands,
+        time_range=time_range,
+        tf_win_sec=tf_win_sec,
+        tf_step_sec=tf_step_sec,
+        max_points=max_points,
+        smooth_win_sec=smooth_win_sec,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+        syncfc_n_surrogates=syncfc_n_surrogates,
+        syncfc_null=syncfc_null,
+        syncfc_min_shift_sec=syncfc_min_shift_sec,
+        syncfc_seed=syncfc_seed,
+    )
+    for cell in tqdm(
+        _parallel_map(eeg_entries, worker, n_jobs=n_jobs),
+        total=len(eeg_entries),
+        desc="Mode[syncfc]",
+        unit="eeg",
+    ):
+        if cell is not None:
+            out.append(cell)
+    return out
+
+
 def _compute_phaselag_cell_for_entry(
     entry: EEGEntry,
     analysis_sampling_rate: float,
@@ -3104,6 +4001,8 @@ def _compute_phaselag_cell_for_entry(
     phaselag_min_peak_delta_z: float,
     phaselag_min_peak_delta_frac: float,
     phaselag_min_valid_ratio: float,
+    phaselag_exclude_edge_peaks: bool,
+    phaselag_edge_guard_bins: int,
 ) -> ModeCell | None:
     pair = _prepare_hc_pseudo_pair(
         entry=entry,
@@ -3134,6 +4033,8 @@ def _compute_phaselag_cell_for_entry(
         min_peak_delta_z=float(phaselag_min_peak_delta_z),
         min_peak_delta_frac=float(phaselag_min_peak_delta_frac),
         min_valid_ratio=float(phaselag_min_valid_ratio),
+        exclude_edge_peaks=bool(phaselag_exclude_edge_peaks),
+        edge_guard_bins=int(phaselag_edge_guard_bins),
     )
     if not band_stats:
         return None
@@ -3160,6 +4061,8 @@ def _build_phaselag_mode_cells(
     phaselag_min_peak_delta_z: float,
     phaselag_min_peak_delta_frac: float,
     phaselag_min_valid_ratio: float,
+    phaselag_exclude_edge_peaks: bool,
+    phaselag_edge_guard_bins: int,
     n_jobs: int,
 ) -> list[ModeCell]:
     out: list[ModeCell] = []
@@ -3182,6 +4085,8 @@ def _build_phaselag_mode_cells(
         phaselag_min_peak_delta_z=phaselag_min_peak_delta_z,
         phaselag_min_peak_delta_frac=phaselag_min_peak_delta_frac,
         phaselag_min_valid_ratio=phaselag_min_valid_ratio,
+        phaselag_exclude_edge_peaks=phaselag_exclude_edge_peaks,
+        phaselag_edge_guard_bins=phaselag_edge_guard_bins,
     )
     for cell in tqdm(
         _parallel_map(eeg_entries, worker, n_jobs=n_jobs),
@@ -3324,6 +4229,133 @@ def _build_pearson_mode_cells(
         _parallel_map(eeg_entries, worker, n_jobs=n_jobs),
         total=len(eeg_entries),
         desc="Mode[pearson]",
+        unit="eeg",
+    ):
+        if cell is not None:
+            out.append(cell)
+    return out
+
+
+def _compute_spectrogram_cell_for_entry(
+    entry: EEGEntry,
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    fmin_plot: float,
+    fmax_plot: float,
+    fmin_calc: float,
+    fmax_calc: float,
+    normalize: str,
+    aperiodic_mode: str,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+) -> ModeCell | None:
+    pair = _prepare_hc_pseudo_pair(
+        entry=entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        time_range=time_range,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+    )
+    if pair is None:
+        return None
+    t_sig, x_sig, y_sig = pair
+
+    maps = _compute_wavelet_power_maps_pair(
+        x_sig=x_sig,
+        y_sig=y_sig,
+        t_points=t_sig,
+        sr=float(analysis_sampling_rate),
+        win_sec=float(tf_win_sec),
+        step_sec=float(tf_step_sec),
+        fmin_plot=float(fmin_plot),
+        fmax_plot=float(fmax_plot),
+        fmin_calc=float(fmin_calc),
+        fmax_calc=float(fmax_calc),
+        normalize=str(normalize),
+        aperiodic_mode=str(aperiodic_mode),
+    )
+    if maps is None:
+        return None
+    f_out, t_out, hc_map, ms_map, diff_map, metrics = maps
+    if t_out.size < 2 or f_out.size < 2:
+        return None
+
+    payload = {
+        "time_sec": np.asarray(t_out, dtype=float),
+        "freq_hz": np.asarray(f_out, dtype=float),
+        "hc_map": np.asarray(hc_map, dtype=float),
+        "ms_map": np.asarray(ms_map, dtype=float),
+        "diff_map": np.asarray(diff_map, dtype=float),
+        "map_corr": float(metrics.get("map_corr", np.nan)),
+        "mean_abs_diff_db": float(metrics.get("mean_abs_diff_db", np.nan)),
+        "normalize": str(normalize),
+        "aperiodic_mode": str(aperiodic_mode),
+        "max_points": int(max_points),
+    }
+    return ModeCell(subject=entry.subject, session=entry.session, traces=tuple(), payload=payload)
+
+
+def _build_spectrogram_mode_cells(
+    eeg_entries: list[EEGEntry],
+    analysis_sampling_rate: float,
+    spike_sampling_rate: float,
+    time_range: tuple[float, float],
+    tf_win_sec: float,
+    tf_step_sec: float,
+    max_points: int,
+    fmin_plot: float,
+    fmax_plot: float,
+    fmin_calc: float,
+    fmax_calc: float,
+    normalize: str,
+    aperiodic_mode: str,
+    ms_lfp_sigma: float,
+    ms_lfp_a: float,
+    ms_lfp_a0: float,
+    ms_lfp_distance_map: dict[str, dict[str, Any]] | None,
+    ms_lfp_d_default: float,
+    ms_lfp_post_smooth_sec: float,
+    n_jobs: int,
+) -> list[ModeCell]:
+    out: list[ModeCell] = []
+    worker = partial(
+        _compute_spectrogram_cell_for_entry,
+        analysis_sampling_rate=analysis_sampling_rate,
+        spike_sampling_rate=spike_sampling_rate,
+        time_range=time_range,
+        tf_win_sec=tf_win_sec,
+        tf_step_sec=tf_step_sec,
+        max_points=max_points,
+        fmin_plot=fmin_plot,
+        fmax_plot=fmax_plot,
+        fmin_calc=fmin_calc,
+        fmax_calc=fmax_calc,
+        normalize=normalize,
+        aperiodic_mode=aperiodic_mode,
+        ms_lfp_sigma=ms_lfp_sigma,
+        ms_lfp_a=ms_lfp_a,
+        ms_lfp_a0=ms_lfp_a0,
+        ms_lfp_distance_map=ms_lfp_distance_map,
+        ms_lfp_d_default=ms_lfp_d_default,
+        ms_lfp_post_smooth_sec=ms_lfp_post_smooth_sec,
+    )
+    for cell in tqdm(
+        _parallel_map(eeg_entries, worker, n_jobs=n_jobs),
+        total=len(eeg_entries),
+        desc="Mode[spectrogram]",
         unit="eeg",
     ):
         if cell is not None:
@@ -3535,7 +4567,7 @@ def _build_subject_mode_figure(
         raise ValueError("No cells to plot.")
 
     include_spikes = (mode in TIME_SERIES_MODES) and bool(ms_units_by_session)
-    split_metric_mode = mode in {"coherence_band", "pearson"}
+    split_metric_mode = mode in {"coherence_band", "syncfc", "pearson"}
 
     cells_sorted = sorted(mode_cells, key=lambda c: natural_key(c.session))
     row_specs: list[dict[str, Any]] = []
@@ -4172,6 +5204,312 @@ def _build_subject_mode_figure(
     return fig
 
 
+def _build_subject_spectrogram_figure(
+    subject: str,
+    mode_cells: list[ModeCell],
+    x_title: str,
+    y_title: str,
+) -> Any:
+    _require_plotly()
+    if not mode_cells:
+        raise ValueError("No cells to plot.")
+
+    cells_sorted = sorted(mode_cells, key=lambda c: natural_key(c.session))
+    row_specs: list[dict[str, Any]] = []
+    session_groups: list[tuple[str, int, int]] = []
+    power_values: list[np.ndarray] = []
+    diff_values: list[np.ndarray] = []
+
+    for cell in cells_sorted:
+        payload = cell.payload if isinstance(cell.payload, dict) else None
+        if payload is None:
+            continue
+        t = np.asarray(payload.get("time_sec", np.array([], dtype=float)), dtype=float).reshape(-1)
+        f = np.asarray(payload.get("freq_hz", np.array([], dtype=float)), dtype=float).reshape(-1)
+        hc_map = np.asarray(payload.get("hc_map", np.array([], dtype=float)), dtype=float)
+        ms_map = np.asarray(payload.get("ms_map", np.array([], dtype=float)), dtype=float)
+        diff_map = np.asarray(payload.get("diff_map", np.array([], dtype=float)), dtype=float)
+        if t.size < 2 or f.size < 2:
+            continue
+        if hc_map.shape != (f.size, t.size) or ms_map.shape != (f.size, t.size) or diff_map.shape != (f.size, t.size):
+            continue
+
+        start_row = len(row_specs) + 1
+        row_specs.append(
+            {
+                "kind": "power",
+                "session": cell.session,
+                "subject": cell.subject,
+                "t": t,
+                "f": f,
+                "z": hc_map,
+                "label": "HC LFP",
+                "metrics": payload,
+            }
+        )
+        row_specs.append(
+            {
+                "kind": "power",
+                "session": cell.session,
+                "subject": cell.subject,
+                "t": t,
+                "f": f,
+                "z": ms_map,
+                "label": "MS pseudo-LFP",
+                "metrics": payload,
+            }
+        )
+        row_specs.append(
+            {
+                "kind": "diff",
+                "session": cell.session,
+                "subject": cell.subject,
+                "t": t,
+                "f": f,
+                "z": diff_map,
+                "label": "MS - HC",
+                "metrics": payload,
+            }
+        )
+        end_row = len(row_specs)
+        session_groups.append((cell.session, start_row, end_row))
+
+        for arr in (hc_map, ms_map):
+            vv = np.asarray(arr, dtype=float).reshape(-1)
+            vv = vv[np.isfinite(vv)]
+            if vv.size:
+                power_values.append(vv)
+        dd = diff_map.reshape(-1)
+        dd = dd[np.isfinite(dd)]
+        if dd.size:
+            diff_values.append(dd)
+
+    if not row_specs:
+        raise ValueError("No plottable spectrogram rows for this subject.")
+
+    if len(session_groups) > 1:
+        row_specs_spaced: list[dict[str, Any]] = []
+        session_groups_spaced: list[tuple[str, int, int]] = []
+        for gidx, (session, start_row, end_row) in enumerate(session_groups):
+            row_specs_spaced.extend(row_specs[start_row - 1:end_row])
+            new_start = len(row_specs_spaced) - (end_row - start_row)
+            new_end = len(row_specs_spaced)
+            session_groups_spaced.append((session, new_start, new_end))
+            if gidx < len(session_groups) - 1:
+                row_specs_spaced.append({"kind": "gap"})
+        row_specs = row_specs_spaced
+        session_groups = session_groups_spaced
+
+    power_concat = np.concatenate(power_values) if power_values else np.array([], dtype=float)
+    if power_concat.size:
+        z_power_min, z_power_max = np.nanpercentile(power_concat, [2, 98])
+        if not np.isfinite(z_power_min) or not np.isfinite(z_power_max) or z_power_max <= z_power_min:
+            z_power_min, z_power_max = float(np.nanmin(power_concat)), float(np.nanmax(power_concat))
+    else:
+        z_power_min, z_power_max = -1.0, 1.0
+    if z_power_max <= z_power_min:
+        z_power_min -= 1.0
+        z_power_max += 1.0
+
+    diff_concat = np.concatenate(diff_values) if diff_values else np.array([], dtype=float)
+    if diff_concat.size:
+        z_diff_abs = float(np.nanpercentile(np.abs(diff_concat), 98))
+        if not np.isfinite(z_diff_abs) or z_diff_abs <= 0.0:
+            z_diff_abs = float(np.nanmax(np.abs(diff_concat)))
+    else:
+        z_diff_abs = 1.0
+    if not np.isfinite(z_diff_abs) or z_diff_abs <= 0.0:
+        z_diff_abs = 1.0
+
+    n_rows = len(row_specs)
+    map_row_height_px = 230.0
+    session_gap_px = 18.0
+    row_gap_px = 5.0
+    margin_top = 58
+    margin_bottom = 46
+    row_heights_px = [
+        (map_row_height_px if spec["kind"] != "gap" else session_gap_px)
+        for spec in row_specs
+    ]
+    inner_height_px = float(np.sum(row_heights_px)) + max(0.0, (n_rows - 1) * row_gap_px)
+    vertical_spacing = (row_gap_px / inner_height_px) if n_rows > 1 and inner_height_px > 0 else 0.0
+
+    fig = make_subplots(
+        rows=n_rows,
+        cols=1,
+        shared_xaxes=False,
+        vertical_spacing=vertical_spacing,
+        row_heights=row_heights_px,
+    )
+
+    x_min = np.inf
+    x_max = -np.inf
+    f_min = np.inf
+    f_max = -np.inf
+    for spec in row_specs:
+        if spec["kind"] == "gap":
+            continue
+        t = np.asarray(spec["t"], dtype=float).reshape(-1)
+        f = np.asarray(spec["f"], dtype=float).reshape(-1)
+        if t.size >= 2:
+            x_min = min(x_min, float(np.nanmin(t)))
+            x_max = max(x_max, float(np.nanmax(t)))
+        if f.size >= 2:
+            f_min = min(f_min, float(np.nanmin(f)))
+            f_max = max(f_max, float(np.nanmax(f)))
+    if not np.isfinite(x_min):
+        x_min = 0.0
+    if (not np.isfinite(x_max)) or x_max <= x_min:
+        x_max = x_min + 1.0
+    if not np.isfinite(f_min):
+        f_min = 0.0
+    if (not np.isfinite(f_max)) or f_max <= f_min:
+        f_max = f_min + 1.0
+
+    first_power_scale = True
+    first_diff_scale = True
+    row_kind_map = {idx + 1: spec["kind"] for idx, spec in enumerate(row_specs)}
+    visible_rows = [r for r in range(1, n_rows + 1) if row_kind_map.get(r) != "gap"]
+    bottom_visible_row = visible_rows[-1] if visible_rows else n_rows
+    session_bottom_rows = {
+        end_row
+        for _, _, end_row in session_groups
+        if row_kind_map.get(end_row) != "gap"
+    }
+
+    for row_idx, spec in enumerate(row_specs, start=1):
+        if spec["kind"] == "gap":
+            fig.update_xaxes(visible=False, row=row_idx, col=1)
+            fig.update_yaxes(visible=False, row=row_idx, col=1)
+            continue
+
+        t = np.asarray(spec["t"], dtype=float).reshape(-1)
+        f = np.asarray(spec["f"], dtype=float).reshape(-1)
+        z = np.asarray(spec["z"], dtype=float)
+        max_points = int(spec.get("metrics", {}).get("max_points", 0))
+        t_plot, z_plot = _downsample_heatmap_time(t, z, max_points)
+
+        is_diff = spec["kind"] == "diff"
+        show_scale = first_diff_scale if is_diff else first_power_scale
+        if is_diff:
+            first_diff_scale = False
+            colorscale = "RdBu_r"
+            zmin = -z_diff_abs
+            zmax = z_diff_abs
+            ctitle = "MS-HC dB"
+        else:
+            first_power_scale = False
+            colorscale = "Jet"
+            zmin = float(z_power_min)
+            zmax = float(z_power_max)
+            ctitle = "Power (dB)"
+
+        fig.add_trace(
+            go.Heatmap(
+                x=t_plot,
+                y=f,
+                z=z_plot,
+                colorscale=colorscale,
+                zmin=float(zmin),
+                zmax=float(zmax),
+                colorbar=(
+                    {"title": ctitle, "len": 0.22, "thickness": 12}
+                    if show_scale
+                    else None
+                ),
+                showscale=show_scale,
+                hovertemplate=f"{spec['label']}<br>t=%{{x:.3f}}s<br>f=%{{y:.3f}}Hz<br>v=%{{z:.6g}}<extra></extra>",
+            ),
+            row=row_idx,
+            col=1,
+        )
+
+        xref = "x domain" if row_idx == 1 else f"x{row_idx} domain"
+        yref = "y domain" if row_idx == 1 else f"y{row_idx} domain"
+        metrics = spec.get("metrics", {})
+        extra = ""
+        if spec["label"] == "HC LFP":
+            corr = float(metrics.get("map_corr", np.nan))
+            mae = float(metrics.get("mean_abs_diff_db", np.nan))
+            corr_s = f"{corr:.3g}" if np.isfinite(corr) else "NA"
+            mae_s = f"{mae:.3g}" if np.isfinite(mae) else "NA"
+            extra = f"<br>map r={corr_s}, mean |MS-HC|={mae_s} dB"
+        panel_title = f"{subject} | {spec['session']} | {spec['label']}{extra}"
+        fig.add_annotation(
+            x=0.02,
+            y=0.98,
+            xref=xref,
+            yref=yref,
+            text=f"<b>{panel_title}</b>",
+            showarrow=False,
+            xanchor="left",
+            yanchor="top",
+            align="left",
+            font={"size": 12, "color": "white"},
+            bgcolor="rgba(0,0,0,0.38)",
+            borderpad=2,
+        )
+
+    for row_idx in range(1, n_rows + 1):
+        row_kind = row_kind_map.get(row_idx, "power")
+        if row_kind == "gap":
+            continue
+        fig.update_xaxes(
+            range=[float(x_min), float(x_max)],
+            matches="x",
+            title_text=(x_title if row_idx == bottom_visible_row else None),
+            showgrid=True,
+            zeroline=False,
+            showticklabels=(row_idx in session_bottom_rows),
+            row=row_idx,
+            col=1,
+        )
+        fig.update_yaxes(
+            range=[float(f_min), float(f_max)],
+            title_text=(y_title if row_idx == visible_rows[0] else None),
+            showgrid=True,
+            zeroline=False,
+            row=row_idx,
+            col=1,
+        )
+
+    for _, start_row, end_row in session_groups:
+        y_top_axis = fig.layout.yaxis if start_row == 1 else getattr(fig.layout, f"yaxis{start_row}")
+        y_bot_axis = fig.layout.yaxis if end_row == 1 else getattr(fig.layout, f"yaxis{end_row}")
+        y_top_domain = getattr(y_top_axis, "domain", None)
+        y_bot_domain = getattr(y_bot_axis, "domain", None)
+        if (
+            y_top_domain is None
+            or y_bot_domain is None
+            or len(y_top_domain) != 2
+            or len(y_bot_domain) != 2
+        ):
+            continue
+        fig.add_shape(
+            type="rect",
+            x0=0.0,
+            x1=1.0,
+            y0=float(y_bot_domain[0]),
+            y1=float(y_top_domain[1]),
+            xref="paper",
+            yref="paper",
+            line={"color": "rgba(30,30,30,0.85)", "width": 1.0},
+            fillcolor="rgba(0,0,0,0)",
+            layer="above",
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        height=int(inner_height_px + margin_top + margin_bottom),
+        margin={"l": 86, "r": 28, "t": margin_top, "b": margin_bottom},
+        showlegend=False,
+        title={"text": f"{subject} | Spectrogram", "x": 0.01},
+        dragmode="pan",
+        hovermode="x",
+    )
+    return fig
+
+
 def _build_subject_coherence_figure(
     subject: str,
     mode_cells: list[ModeCell],
@@ -4787,7 +6125,8 @@ def _build_subject_phaselag_figure(
                     f"{band_label}: peak={float(st.get('peak_lag_ms', np.nan)):.3g}ms, "
                     f"mode={float(st.get('mode_lag_ms', np.nan)):.3g}ms, "
                     f"MSlead={float(st.get('ms_lead_ratio', np.nan)):.2f}, "
-                    f"valid={int(st.get('n_valid_windows', 0))}/{int(st.get('n_total_windows', 0))}"
+                    f"valid={int(st.get('n_valid_windows', 0))}/{int(st.get('n_total_windows', 0))}, "
+                    f"edge={int(st.get('n_edge_hit_windows', 0))}"
                 )
             except Exception:
                 pass
@@ -4851,6 +6190,195 @@ def _build_subject_phaselag_figure(
     return fig
 
 
+def _build_subject_syncfc_figure(
+    subject: str,
+    mode_cells: list[ModeCell],
+) -> Any:
+    _require_plotly()
+    cells_sorted = sorted(mode_cells, key=lambda c: natural_key(c.session))
+    row_specs: list[dict[str, Any]] = []
+    band_order: list[str] = []
+
+    for cell in cells_sorted:
+        payload = cell.payload if isinstance(cell.payload, dict) else None
+        if payload is None:
+            continue
+        band_stats = payload.get("band_stats")
+        if not isinstance(band_stats, dict) or not band_stats:
+            continue
+        clean_stats: dict[str, dict[str, Any]] = {}
+        for band_label, st in band_stats.items():
+            if not isinstance(st, dict):
+                continue
+            plv = np.asarray(st.get("plv", np.array([], dtype=float)), dtype=float).reshape(-1)
+            coh = np.asarray(st.get("coh", np.array([], dtype=float)), dtype=float).reshape(-1)
+            if int(np.sum(np.isfinite(plv))) < 2 and int(np.sum(np.isfinite(coh))) < 2:
+                continue
+            band = str(band_label)
+            clean_stats[band] = st
+            if band not in band_order:
+                band_order.append(band)
+        if clean_stats:
+            row_specs.append({"session": cell.session, "band_stats": clean_stats})
+
+    if not row_specs:
+        raise ValueError("No plottable SyncFC rows for this subject.")
+
+    fig = make_subplots(
+        rows=len(row_specs),
+        cols=2,
+        shared_xaxes=False,
+        shared_yaxes=True,
+        horizontal_spacing=0.08,
+        vertical_spacing=(0.06 / float(max(1, len(row_specs)))) if len(row_specs) > 1 else 0.0,
+        subplot_titles=None,
+    )
+
+    legend_seen: set[str] = set()
+    for row_idx, spec in enumerate(row_specs, start=1):
+        band_stats = spec["band_stats"]
+        summary_lines: list[str] = []
+        for bidx, band_label in enumerate(band_order):
+            st = band_stats.get(band_label)
+            if not isinstance(st, dict):
+                continue
+            color = PLOTLY_COLORS[bidx % len(PLOTLY_COLORS)]
+            for col_idx, metric_key, metric_label in (
+                (1, "plv", "PLV"),
+                (2, "coh", "Coherence"),
+            ):
+                vals = np.asarray(st.get(metric_key, np.array([], dtype=float)), dtype=float).reshape(-1)
+                vals = vals[np.isfinite(vals)]
+                if vals.size >= 2:
+                    legend_key = "syncfc_real"
+                    show_legend = legend_key not in legend_seen
+                    legend_seen.add(legend_key)
+                    fig.add_trace(
+                        go.Box(
+                            x=[band_label] * int(vals.size),
+                            y=vals,
+                            name="real",
+                            legendgroup="real",
+                            showlegend=show_legend,
+                            marker={"color": color, "size": 2.4, "opacity": 0.22},
+                            line={"color": color, "width": 1.9},
+                            fillcolor=color,
+                            opacity=0.74,
+                            boxmean=True,
+                            boxpoints="suspectedoutliers",
+                            jitter=0.16,
+                            pointpos=0.0,
+                            width=0.58,
+                            hovertemplate=(
+                                f"{band_label}<br>{metric_label} real=%{{y:.4g}}"
+                                "<extra></extra>"
+                            ),
+                        ),
+                        row=row_idx,
+                        col=col_idx,
+                    )
+
+                null_vals = np.asarray(
+                    st.get(f"null_{metric_key}", np.array([], dtype=float)),
+                    dtype=float,
+                ).reshape(-1)
+                null_vals = null_vals[np.isfinite(null_vals)]
+                if null_vals.size >= 2:
+                    legend_key = "syncfc_null"
+                    show_legend = legend_key not in legend_seen
+                    legend_seen.add(legend_key)
+                    fig.add_trace(
+                        go.Box(
+                            x=[band_label] * int(null_vals.size),
+                            y=null_vals,
+                            name="permutation",
+                            legendgroup="permutation",
+                            showlegend=show_legend,
+                            marker={"color": "rgba(90,90,90,0.35)", "size": 2.0, "opacity": 0.12},
+                            line={"color": "rgba(90,90,90,0.95)", "width": 1.6},
+                            fillcolor="rgba(150,150,150,0.45)",
+                            opacity=0.62,
+                            boxmean=True,
+                            boxpoints=False,
+                            width=0.58,
+                            hovertemplate=(
+                                f"{band_label}<br>{metric_label} permutation=%{{y:.4g}}"
+                                "<extra></extra>"
+                            ),
+                        ),
+                        row=row_idx,
+                        col=col_idx,
+                    )
+
+            try:
+                null_label = "perm" if str(st.get("null_mode", "")) == "window_shuffle" else "null"
+                summary_lines.append(
+                    f"{band_label}: "
+                    f"PLV={float(st.get('median_plv', np.nan)):.3g}/{null_label} "
+                    f"{float(st.get('surrogate_mean_plv', np.nan)):.3g}, "
+                    f"p={float(st.get('p_plv', np.nan)):.3g}; "
+                    f"Coh={float(st.get('median_coh', np.nan)):.3g}/{null_label} "
+                    f"{float(st.get('surrogate_mean_coh', np.nan)):.3g}, "
+                    f"p={float(st.get('p_coh', np.nan)):.3g}; "
+                    f"n={int(st.get('n_windows', 0))}, null={int(st.get('n_surrogates', 0))}"
+                )
+            except Exception:
+                pass
+
+        for col_idx, title in ((1, "Window PLV real/permutation distribution"), (2, "Window coherence real/permutation distribution")):
+            fig.update_xaxes(
+                title_text=("Band" if row_idx == len(row_specs) else None),
+                showgrid=True,
+                zeroline=False,
+                categoryorder="array",
+                categoryarray=band_order,
+                row=row_idx,
+                col=col_idx,
+            )
+            fig.update_yaxes(
+                range=[-0.02, 1.02],
+                title_text=(title if row_idx == 1 else None),
+                showgrid=True,
+                zeroline=False,
+                row=row_idx,
+                col=col_idx,
+            )
+
+        annotation_text = f"<b>{subject} | {spec['session']}</b>"
+        if summary_lines:
+            annotation_text += "<br>" + "<br>".join(summary_lines[:8])
+        axis_num = (row_idx - 1) * 2 + 1
+        axis_suffix = "" if axis_num == 1 else str(axis_num)
+        fig.add_annotation(
+            x=0.01,
+            y=0.98,
+            xref=f"x{axis_suffix} domain",
+            yref=f"y{axis_suffix} domain",
+            text=annotation_text,
+            showarrow=False,
+            xanchor="left",
+            yanchor="top",
+            align="left",
+            font={"size": 10, "color": "black"},
+            bgcolor="rgba(255,255,255,0.72)",
+            borderpad=2,
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        height=int((330 * len(row_specs)) + 90),
+        margin={"l": 86, "r": 24, "t": 58, "b": 48},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
+        title={"text": f"{subject} | SyncFC window statistics", "x": 0.01},
+        dragmode="pan",
+        hovermode="closest",
+        boxmode="group",
+        boxgap=0.18,
+        boxgroupgap=0.08,
+    )
+    return fig
+
+
 def _finite_mean(values: list[float]) -> float:
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -4868,6 +6396,25 @@ def _wilcoxon_greater_p(values: np.ndarray) -> float:
         return float(wilcoxon(vals, alternative="greater", zero_method="wilcox").pvalue)
     except ValueError:
         return float("nan")
+
+
+def _bh_fdr(p_values: list[float]) -> list[float]:
+    p = np.asarray(p_values, dtype=float).reshape(-1)
+    q = np.full(p.size, np.nan, dtype=float)
+    finite_idx = np.where(np.isfinite(p))[0]
+    if finite_idx.size == 0:
+        return [float(x) for x in q]
+    p_f = p[finite_idx]
+    order = np.argsort(p_f)
+    ranked = p_f[order]
+    m = float(ranked.size)
+    q_ranked = ranked * m / np.arange(1, ranked.size + 1, dtype=float)
+    q_ranked = np.minimum.accumulate(q_ranked[::-1])[::-1]
+    q_ranked = np.clip(q_ranked, 0.0, 1.0)
+    q_f = np.empty_like(q_ranked)
+    q_f[order] = q_ranked
+    q[finite_idx] = q_f
+    return [float(x) for x in q]
 
 
 def _interp_to_ref(freq: np.ndarray, y: np.ndarray, freq_ref: np.ndarray) -> np.ndarray:
@@ -4892,6 +6439,140 @@ def _interp_to_ref(freq: np.ndarray, y: np.ndarray, freq_ref: np.ndarray) -> np.
     if f_u.size < 2:
         return np.full(fr.size, np.nan, dtype=float)
     return np.interp(fr, f_u, yy_u, left=np.nan, right=np.nan)
+
+
+def _finite_metric_values(rows: list[dict[str, Any]], band: str, key: str) -> np.ndarray:
+    vals = np.asarray(
+        [
+            float(r.get(key, np.nan))
+            for r in rows
+            if r.get("band") == band and np.isfinite(float(r.get(key, np.nan)))
+        ],
+        dtype=float,
+    )
+    return vals[np.isfinite(vals)]
+
+
+def _format_stats_value(value: Any, fmt: str = ".3g") -> str:
+    try:
+        v = float(value)
+    except Exception:
+        return str(value)
+    if not np.isfinite(v):
+        return "NA"
+    return format(v, fmt)
+
+
+def _plotly_table_trace(headers: list[str], rows: list[list[str]]) -> Any:
+    columns = [[row[i] if i < len(row) else "" for row in rows] for i in range(len(headers))]
+    return go.Table(
+        header={
+            "values": [f"<b>{h}</b>" for h in headers],
+            "fill_color": "#e8f2ff",
+            "align": "center",
+            "font": {"size": 12, "color": "#1f2937"},
+        },
+        cells={
+            "values": columns,
+            "fill_color": "#ffffff",
+            "align": "center",
+            "font": {"size": 11, "color": "#1f2937"},
+            "height": 24,
+        },
+    )
+
+
+def _nan_mean_sem(stack: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    arr = np.asarray(stack, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] == 0:
+        return np.array([], dtype=float), np.array([], dtype=float)
+    finite = np.isfinite(arr)
+    n_eff = np.sum(finite, axis=0)
+    sums = np.nansum(np.where(finite, arr, 0.0), axis=0)
+    mean = np.full(arr.shape[1], np.nan, dtype=float)
+    np.divide(sums, n_eff, out=mean, where=n_eff > 0)
+    sem = np.full(arr.shape[1], np.nan, dtype=float)
+    ok = n_eff > 1
+    if np.any(ok):
+        sem[ok] = np.nanstd(arr[:, ok], axis=0, ddof=1) / np.sqrt(n_eff[ok])
+    return mean, sem
+
+
+def _add_mean_sem_traces(
+    fig: Any,
+    x: np.ndarray,
+    stack: np.ndarray,
+    *,
+    row: int,
+    col: int,
+    color: str,
+    name: str,
+    show_subjects: bool = True,
+    showlegend: bool = True,
+) -> None:
+    xx = np.asarray(x, dtype=float).reshape(-1)
+    arr = np.asarray(stack, dtype=float)
+    if arr.ndim != 2 or xx.size == 0:
+        return
+    if show_subjects:
+        for curve in arr:
+            fig.add_trace(
+                go.Scatter(
+                    x=xx,
+                    y=curve,
+                    mode="lines",
+                    line={"color": "rgba(130,130,130,0.38)", "width": 0.8},
+                    hoverinfo="skip",
+                    showlegend=False,
+                ),
+                row=row,
+                col=col,
+            )
+    mean, sem = _nan_mean_sem(arr)
+    if mean.size != xx.size:
+        return
+    lo = mean - sem
+    hi = mean + sem
+    fig.add_trace(
+        go.Scatter(
+            x=np.concatenate([xx, xx[::-1]]),
+            y=np.concatenate([hi, lo[::-1]]),
+            mode="lines",
+            line={"width": 0},
+            fill="toself",
+            fillcolor=_hex_to_rgba(color, 0.16),
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        row=row,
+        col=col,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=xx,
+            y=mean,
+            mode="lines",
+            line={"color": color, "width": 2.3},
+            name=name,
+            showlegend=showlegend,
+            hovertemplate="%{x:.4g}, %{y:.4g}<extra>" + name + "</extra>",
+        ),
+        row=row,
+        col=col,
+    )
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    color = str(hex_color).lstrip("#")
+    if len(color) != 6:
+        return f"rgba(0,0,0,{float(alpha):.3g})"
+    try:
+        r = int(color[0:2], 16)
+        g = int(color[2:4], 16)
+        b = int(color[4:6], 16)
+    except ValueError:
+        return f"rgba(0,0,0,{float(alpha):.3g})"
+    return f"rgba({r},{g},{b},{float(alpha):.3g})"
 
 
 def _collect_granger_group_stats(
@@ -5093,7 +6774,7 @@ def _write_granger_stats_pdf(
             ]
             fig, ax = plt.subplots(figsize=(11, 6.5))
             ax.axhline(0, color="0.25", linewidth=1.0)
-            ax.boxplot(di_data, labels=band_labels, showfliers=False)
+            _boxplot_with_labels(ax, di_data, band_labels, showfliers=False)
             rng = np.random.default_rng(0)
             for i, vals in enumerate(di_data, start=1):
                 if vals.size == 0:
@@ -5134,7 +6815,7 @@ def _write_granger_stats_pdf(
                 for band in band_labels
             ]
             fig, ax = plt.subplots(figsize=(11, 6.5))
-            ax.boxplot(peak_data, labels=band_labels, showfliers=False)
+            _boxplot_with_labels(ax, peak_data, band_labels, showfliers=False)
             for i, vals in enumerate(peak_data, start=1):
                 if vals.size == 0:
                     continue
@@ -5196,6 +6877,404 @@ def _write_granger_stats_pdf(
     return True
 
 
+def _collect_syncfc_group_stats(mode_cells: list[ModeCell]) -> dict[str, Any] | None:
+    records: list[dict[str, Any]] = []
+    for cell in mode_cells:
+        payload = cell.payload if isinstance(cell.payload, dict) else None
+        if payload is None:
+            continue
+        band_stats = payload.get("band_stats")
+        if not isinstance(band_stats, dict):
+            continue
+        for band_label, st in band_stats.items():
+            if not isinstance(st, dict):
+                continue
+            records.append(
+                {
+                    "subject": cell.subject,
+                    "session": cell.session,
+                    "band": str(band_label),
+                    "median_coh": float(st.get("median_coh", np.nan)),
+                    "median_plv": float(st.get("median_plv", np.nan)),
+                    "surrogate_mean_coh": float(st.get("surrogate_mean_coh", np.nan)),
+                    "surrogate_mean_plv": float(st.get("surrogate_mean_plv", np.nan)),
+                    "z_coh": float(st.get("z_coh", np.nan)),
+                    "z_plv": float(st.get("z_plv", np.nan)),
+                    "p_coh": float(st.get("p_coh", np.nan)),
+                    "p_plv": float(st.get("p_plv", np.nan)),
+                    "n_windows": int(st.get("n_windows", 0)),
+                    "n_total_windows": int(st.get("n_total_windows", 0)),
+                    "n_surrogates": int(st.get("n_surrogates", 0)),
+                    "null_mode": str(st.get("null_mode", "")),
+                }
+            )
+
+    if not records:
+        return None
+
+    subjects = sorted({r["subject"] for r in records}, key=natural_key)
+    bands = sorted({r["band"] for r in records}, key=natural_key)
+    subject_band_rows: list[dict[str, Any]] = []
+    for subject in subjects:
+        for band in bands:
+            rr = [r for r in records if r["subject"] == subject and r["band"] == band]
+            if not rr:
+                continue
+            median_coh = _finite_mean([float(r["median_coh"]) for r in rr])
+            median_plv = _finite_mean([float(r["median_plv"]) for r in rr])
+            surr_coh = _finite_mean([float(r["surrogate_mean_coh"]) for r in rr])
+            surr_plv = _finite_mean([float(r["surrogate_mean_plv"]) for r in rr])
+            subject_band_rows.append(
+                {
+                    "subject": subject,
+                    "band": band,
+                    "n_sessions": len({str(r["session"]) for r in rr}),
+                    "median_coh": median_coh,
+                    "median_plv": median_plv,
+                    "surrogate_mean_coh": surr_coh,
+                    "surrogate_mean_plv": surr_plv,
+                    "delta_coh": median_coh - surr_coh if np.isfinite(median_coh) and np.isfinite(surr_coh) else float("nan"),
+                    "delta_plv": median_plv - surr_plv if np.isfinite(median_plv) and np.isfinite(surr_plv) else float("nan"),
+                    "z_coh": _finite_mean([float(r["z_coh"]) for r in rr]),
+                    "z_plv": _finite_mean([float(r["z_plv"]) for r in rr]),
+                    "p_coh": _finite_mean([float(r["p_coh"]) for r in rr]),
+                    "p_plv": _finite_mean([float(r["p_plv"]) for r in rr]),
+                    "n_windows": int(np.sum([int(r["n_windows"]) for r in rr])),
+                    "n_total_windows": int(np.sum([int(r["n_total_windows"]) for r in rr])),
+                    "n_surrogates": int(np.nanmax([int(r["n_surrogates"]) for r in rr])),
+                }
+            )
+
+    summary_rows: list[dict[str, Any]] = []
+    for band in bands:
+        subj_rows = [r for r in subject_band_rows if r["band"] == band]
+        sess_rows = [r for r in records if r["band"] == band]
+        if not subj_rows:
+            continue
+        plv_vals = np.asarray([float(r["median_plv"]) for r in subj_rows], dtype=float)
+        coh_vals = np.asarray([float(r["median_coh"]) for r in subj_rows], dtype=float)
+        z_plv_vals = np.asarray([float(r["z_plv"]) for r in subj_rows], dtype=float)
+        z_coh_vals = np.asarray([float(r["z_coh"]) for r in subj_rows], dtype=float)
+        d_plv_vals = np.asarray([float(r["delta_plv"]) for r in subj_rows], dtype=float)
+        d_coh_vals = np.asarray([float(r["delta_coh"]) for r in subj_rows], dtype=float)
+        plv_vals = plv_vals[np.isfinite(plv_vals)]
+        coh_vals = coh_vals[np.isfinite(coh_vals)]
+        z_plv_vals = z_plv_vals[np.isfinite(z_plv_vals)]
+        z_coh_vals = z_coh_vals[np.isfinite(z_coh_vals)]
+        d_plv_vals = d_plv_vals[np.isfinite(d_plv_vals)]
+        d_coh_vals = d_coh_vals[np.isfinite(d_coh_vals)]
+        if plv_vals.size == 0 and coh_vals.size == 0:
+            continue
+        summary_rows.append(
+            {
+                "band": band,
+                "n_subjects": int(len({r["subject"] for r in subj_rows})),
+                "n_sessions": int(len(sess_rows)),
+                "median_plv": float(np.nanmedian(plv_vals)) if plv_vals.size else float("nan"),
+                "iqr_plv_low": float(np.nanpercentile(plv_vals, 25)) if plv_vals.size else float("nan"),
+                "iqr_plv_high": float(np.nanpercentile(plv_vals, 75)) if plv_vals.size else float("nan"),
+                "median_coh": float(np.nanmedian(coh_vals)) if coh_vals.size else float("nan"),
+                "iqr_coh_low": float(np.nanpercentile(coh_vals, 25)) if coh_vals.size else float("nan"),
+                "iqr_coh_high": float(np.nanpercentile(coh_vals, 75)) if coh_vals.size else float("nan"),
+                "median_z_plv": float(np.nanmedian(z_plv_vals)) if z_plv_vals.size else float("nan"),
+                "median_z_coh": float(np.nanmedian(z_coh_vals)) if z_coh_vals.size else float("nan"),
+                "median_delta_plv": float(np.nanmedian(d_plv_vals)) if d_plv_vals.size else float("nan"),
+                "median_delta_coh": float(np.nanmedian(d_coh_vals)) if d_coh_vals.size else float("nan"),
+                "p_z_plv_gt_0": _wilcoxon_greater_p(z_plv_vals),
+                "p_z_coh_gt_0": _wilcoxon_greater_p(z_coh_vals),
+                "p_delta_plv_gt_0": _wilcoxon_greater_p(d_plv_vals),
+                "p_delta_coh_gt_0": _wilcoxon_greater_p(d_coh_vals),
+                "n_z_plv_positive": int(np.sum(z_plv_vals > 0)),
+                "n_z_coh_positive": int(np.sum(z_coh_vals > 0)),
+            }
+        )
+
+    q_plv = _bh_fdr([float(r["p_z_plv_gt_0"]) for r in summary_rows])
+    q_coh = _bh_fdr([float(r["p_z_coh_gt_0"]) for r in summary_rows])
+    q_delta_plv = _bh_fdr([float(r["p_delta_plv_gt_0"]) for r in summary_rows])
+    q_delta_coh = _bh_fdr([float(r["p_delta_coh_gt_0"]) for r in summary_rows])
+    for row, qp, qc, qdp, qdc in zip(summary_rows, q_plv, q_coh, q_delta_plv, q_delta_coh):
+        row["q_z_plv_gt_0"] = float(qp)
+        row["q_z_coh_gt_0"] = float(qc)
+        row["q_delta_plv_gt_0"] = float(qdp)
+        row["q_delta_coh_gt_0"] = float(qdc)
+
+    return {
+        "records": records,
+        "subject_band_rows": subject_band_rows,
+        "summary_rows": summary_rows,
+        "bands": bands,
+    }
+
+
+def _boxplot_with_labels(ax: Any, data: list[np.ndarray], labels: list[str], **kwargs: Any) -> Any:
+    try:
+        return ax.boxplot(data, tick_labels=labels, **kwargs)
+    except TypeError as exc:
+        if "tick_labels" not in str(exc):
+            raise
+        return ax.boxplot(data, labels=labels, **kwargs)
+
+
+def _write_syncfc_stats_pdf(
+    mode_cells: list[ModeCell],
+    out_path: Path,
+    run_name: str,
+) -> bool:
+    stats = _collect_syncfc_group_stats(mode_cells)
+    if stats is None:
+        print("\033[1;33m -- SyncFC stats PDF skipped: no plottable syncfc data.\033[0m")
+        return False
+
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = stats["subject_band_rows"]
+    summary_rows = stats["summary_rows"]
+    bands = [row["band"] for row in summary_rows]
+    rng = np.random.default_rng(0)
+
+    with PdfPages(out_path) as pdf:
+        if bands:
+            fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
+            band_x = np.arange(1, len(bands) + 1, dtype=float)
+            for ax, real_metric, null_metric, color, title, ylabel in (
+                (axes[0], "median_plv", "surrogate_mean_plv", "#1f77b4", "Band-limited PLV", "PLV"),
+                (axes[1], "median_coh", "surrogate_mean_coh", "#d62728", "Band-limited coherence", "Coherence"),
+            ):
+                data: list[np.ndarray] = []
+                positions: list[float] = []
+                box_colors: list[str] = []
+                scatter_specs: list[tuple[float, np.ndarray, str]] = []
+                for i, band in enumerate(bands, start=1):
+                    real = np.asarray(
+                        [
+                            float(r[real_metric])
+                            for r in rows
+                            if r["band"] == band and np.isfinite(float(r[real_metric]))
+                        ],
+                        dtype=float,
+                    )
+                    null = np.asarray(
+                        [
+                            float(r[null_metric])
+                            for r in rows
+                            if r["band"] == band and np.isfinite(float(r[null_metric]))
+                        ],
+                        dtype=float,
+                    )
+                    for pos, vals, c in ((i - 0.18, real, color), (i + 0.18, null, "0.55")):
+                        if vals.size == 0:
+                            continue
+                        data.append(vals)
+                        positions.append(float(pos))
+                        box_colors.append(c)
+                        scatter_specs.append((float(pos), vals, c))
+                if data:
+                    bp = ax.boxplot(
+                        data,
+                        positions=positions,
+                        widths=0.28,
+                        patch_artist=True,
+                        showfliers=False,
+                    )
+                    for patch, c in zip(bp["boxes"], box_colors):
+                        patch.set_facecolor(c)
+                        patch.set_alpha(0.42 if c == "0.55" else 0.55)
+                        patch.set_linewidth(1.4)
+                    for key in ("whiskers", "caps", "medians"):
+                        for artist in bp[key]:
+                            artist.set_linewidth(1.2)
+                for pos, vals, c in scatter_specs:
+                    ax.scatter(
+                        pos + rng.uniform(-0.045, 0.045, size=vals.size),
+                        vals,
+                        s=26,
+                        color=c,
+                        alpha=0.72 if c != "0.55" else 0.48,
+                        edgecolor="white",
+                        linewidth=0.4,
+                    )
+                ax.set_title(title)
+                ax.set_ylabel(ylabel)
+                ax.set_ylim(-0.02, 1.02)
+                ax.set_xlim(0.4, len(bands) + 0.6)
+                ax.set_xticks(band_x)
+                ax.set_xticklabels(bands, rotation=0)
+                ax.grid(True, axis="y", alpha=0.3)
+                ax.scatter([], [], s=32, color=color, alpha=0.72, label="real")
+                ax.scatter([], [], s=32, color="0.55", alpha=0.48, label="null")
+                ax.legend(loc="upper right")
+            fig.suptitle(f"{run_name} | SyncFC subject-level real-null synchrony", fontsize=13)
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+            pdf.savefig(fig)
+            plt.close(fig)
+
+            has_z = any(np.isfinite(float(r.get("z_plv", np.nan))) or np.isfinite(float(r.get("z_coh", np.nan))) for r in rows)
+            if has_z:
+                fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
+                for ax, metric, color, title, p_key, q_key in (
+                    (axes[0], "z_plv", "#1f77b4", "Null-normalized PLV", "p_z_plv_gt_0", "q_z_plv_gt_0"),
+                    (axes[1], "z_coh", "#d62728", "Null-normalized coherence", "p_z_coh_gt_0", "q_z_coh_gt_0"),
+                ):
+                    data = [
+                        np.asarray(
+                            [
+                                float(r[metric])
+                                for r in rows
+                                if r["band"] == band and np.isfinite(float(r[metric]))
+                            ],
+                            dtype=float,
+                        )
+                        for band in bands
+                    ]
+                    ax.axhline(0, color="0.25", linewidth=1.0)
+                    _boxplot_with_labels(ax, data, bands, showfliers=False)
+                    for i, vals in enumerate(data, start=1):
+                        if vals.size == 0:
+                            continue
+                        ax.scatter(
+                            i + rng.uniform(-0.12, 0.12, size=vals.size),
+                            vals,
+                            s=26,
+                            color=color,
+                            alpha=0.75,
+                            edgecolor="white",
+                            linewidth=0.4,
+                        )
+                    p_txt = []
+                    for row in summary_rows:
+                        p = float(row.get(p_key, np.nan))
+                        q = float(row.get(q_key, np.nan))
+                        if np.isfinite(p):
+                            q_part = f", q={q:.3g}" if np.isfinite(q) else ""
+                            p_txt.append(f"{row['band']}: p={p:.3g}{q_part}")
+                    ax.set_title(title)
+                    ax.set_ylabel("Zsync")
+                    ax.grid(True, axis="y", alpha=0.3)
+                    ax.text(
+                        0.01,
+                        0.99,
+                        "Wilcoxon signed-rank, one-sided Zsync > 0\n" + "\n".join(p_txt),
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=8,
+                        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "0.85"},
+                    )
+                fig.suptitle(f"{run_name} | SyncFC null-normalized statistics", fontsize=13)
+                fig.tight_layout(rect=[0, 0, 1, 0.96])
+                pdf.savefig(fig)
+                plt.close(fig)
+
+                fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
+                x = np.arange(len(bands), dtype=float)
+                width = 0.36
+                for ax, real_key, surr_key, color, title in (
+                    (axes[0], "median_plv", "surrogate_mean_plv", "#1f77b4", "PLV real vs null"),
+                    (axes[1], "median_coh", "surrogate_mean_coh", "#d62728", "Coherence real vs null"),
+                ):
+                    real_means = []
+                    surr_means = []
+                    real_sem = []
+                    surr_sem = []
+                    for band in bands:
+                        real = np.asarray(
+                            [
+                                float(r[real_key])
+                                for r in rows
+                                if r["band"] == band and np.isfinite(float(r[real_key]))
+                            ],
+                            dtype=float,
+                        )
+                        surr = np.asarray(
+                            [
+                                float(r[surr_key])
+                                for r in rows
+                                if r["band"] == band and np.isfinite(float(r[surr_key]))
+                            ],
+                            dtype=float,
+                        )
+                        real_means.append(float(np.nanmean(real)) if real.size else np.nan)
+                        surr_means.append(float(np.nanmean(surr)) if surr.size else np.nan)
+                        real_sem.append(float(np.nanstd(real, ddof=1) / np.sqrt(real.size)) if real.size > 1 else 0.0)
+                        surr_sem.append(float(np.nanstd(surr, ddof=1) / np.sqrt(surr.size)) if surr.size > 1 else 0.0)
+                    ax.bar(x - width / 2, real_means, width, yerr=real_sem, label="real", color=color, alpha=0.78)
+                    ax.bar(x + width / 2, surr_means, width, yerr=surr_sem, label="null", color="0.6", alpha=0.65)
+                    ax.set_title(title)
+                    ax.set_ylabel(real_key.replace("median_", "").upper())
+                    ax.set_ylim(-0.02, 1.02)
+                    ax.grid(True, axis="y", alpha=0.3)
+                    ax.legend(loc="upper right")
+                axes[-1].set_xticks(x)
+                axes[-1].set_xticklabels(bands, rotation=0)
+                fig.suptitle(f"{run_name} | SyncFC real-null comparison", fontsize=13)
+                fig.tight_layout(rect=[0, 0, 1, 0.96])
+                pdf.savefig(fig)
+                plt.close(fig)
+
+            table_rows = []
+            for row in summary_rows:
+                p_plv = float(row.get("p_z_plv_gt_0", np.nan))
+                q_plv = float(row.get("q_z_plv_gt_0", np.nan))
+                p_coh = float(row.get("p_z_coh_gt_0", np.nan))
+                q_coh = float(row.get("q_z_coh_gt_0", np.nan))
+                table_rows.append(
+                    [
+                        row["band"],
+                        str(int(row["n_subjects"])),
+                        str(int(row["n_sessions"])),
+                        f"{float(row['median_plv']):.3f}",
+                        f"{float(row['median_z_plv']):.3g}" if np.isfinite(float(row["median_z_plv"])) else "NA",
+                        f"{p_plv:.3g}" if np.isfinite(p_plv) else "NA",
+                        f"{q_plv:.3g}" if np.isfinite(q_plv) else "NA",
+                        f"{float(row['median_coh']):.3f}",
+                        f"{float(row['median_z_coh']):.3g}" if np.isfinite(float(row["median_z_coh"])) else "NA",
+                        f"{p_coh:.3g}" if np.isfinite(p_coh) else "NA",
+                        f"{q_coh:.3g}" if np.isfinite(q_coh) else "NA",
+                    ]
+                )
+            fig, ax = plt.subplots(figsize=(11, 6.5))
+            ax.axis("off")
+            ax.set_title(
+                f"{run_name} | SyncFC band statistics\n"
+                "Session metrics are averaged within subject before inference.",
+                fontsize=12,
+                pad=16,
+            )
+            table = ax.table(
+                cellText=table_rows,
+                colLabels=[
+                    "Band",
+                    "N subj",
+                    "N sess",
+                    "Median PLV",
+                    "Median Z PLV",
+                    "p ZPLV>0",
+                    "q ZPLV",
+                    "Median Coh",
+                    "Median Z Coh",
+                    "p ZCoh>0",
+                    "q ZCoh",
+                ],
+                loc="center",
+                cellLoc="center",
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(7)
+            table.scale(1.0, 1.42)
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    print(f"-- saved SyncFC stats PDF: {out_path}")
+    return True
+
+
 def _collect_phaselag_group_stats(mode_cells: list[ModeCell]) -> dict[str, Any] | None:
     records: list[dict[str, Any]] = []
     curve_by_subject_band: dict[tuple[str, str], list[tuple[np.ndarray, np.ndarray]]] = {}
@@ -5238,6 +7317,7 @@ def _collect_phaselag_group_stats(mode_cells: list[ModeCell]) -> dict[str, Any] 
                     "valid_ratio": float(st.get("valid_ratio", np.nan)),
                     "median_z": float(st.get("median_z", np.nan)),
                     "median_plv": float(st.get("median_plv", np.nan)),
+                    "n_edge_hit_windows": int(st.get("n_edge_hit_windows", 0)),
                     "n_valid_windows": int(st.get("n_valid_windows", 0)),
                     "n_total_windows": int(st.get("n_total_windows", 0)),
                 }
@@ -5267,6 +7347,7 @@ def _collect_phaselag_group_stats(mode_cells: list[ModeCell]) -> dict[str, Any] 
                     "valid_ratio": _finite_mean([float(r["valid_ratio"]) for r in rr]),
                     "median_z": _finite_mean([float(r["median_z"]) for r in rr]),
                     "median_plv": _finite_mean([float(r["median_plv"]) for r in rr]),
+                    "n_edge_hit_windows": int(np.sum([int(r["n_edge_hit_windows"]) for r in rr])),
                     "n_valid_windows": int(np.sum([int(r["n_valid_windows"]) for r in rr])),
                     "n_total_windows": int(np.sum([int(r["n_total_windows"]) for r in rr])),
                 }
@@ -5359,7 +7440,7 @@ def _write_phaselag_stats_pdf(
             ]
             fig, ax = plt.subplots(figsize=(11, 6.5))
             ax.axhline(0, color="0.25", linewidth=1.0)
-            ax.boxplot(peak_data, labels=bands, showfliers=False)
+            _boxplot_with_labels(ax, peak_data, bands, showfliers=False)
             for i, vals in enumerate(peak_data, start=1):
                 if vals.size == 0:
                     continue
@@ -5407,7 +7488,7 @@ def _write_phaselag_stats_pdf(
             ]
             fig, ax = plt.subplots(figsize=(11, 6.5))
             ax.axhline(0.5, color="0.25", linewidth=1.0)
-            ax.boxplot(lead_data, labels=bands, showfliers=False)
+            _boxplot_with_labels(ax, lead_data, bands, showfliers=False)
             for i, vals in enumerate(lead_data, start=1):
                 if vals.size == 0:
                     continue
@@ -5515,6 +7596,547 @@ def _write_phaselag_stats_pdf(
 
     print(f"-- saved PhaseLag stats PDF: {out_path}")
     return True
+
+
+def _build_granger_stats_figure(
+    mode_cells: list[ModeCell],
+    bands: list[tuple[str, tuple[float, float]]],
+    run_name: str,
+) -> Any:
+    _require_plotly()
+    stats = _collect_granger_group_stats(mode_cells, bands)
+    if stats is None:
+        raise ValueError("No plottable Granger statistics.")
+
+    freq_ref = np.asarray(stats["freq_ref"], dtype=float)
+    subject_curves = stats["subject_curves"]
+    rows = stats["subject_band_rows"]
+    summary_rows = stats["summary_rows"]
+    band_labels = [row["band"] for row in summary_rows]
+
+    fig = make_subplots(
+        rows=5,
+        cols=1,
+        specs=[[{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "table"}]],
+        row_heights=[0.21, 0.21, 0.18, 0.18, 0.22],
+        vertical_spacing=0.06,
+        subplot_titles=(
+            "MS -> HC subject-averaged gPDC",
+            "HC -> MS subject-averaged gPDC",
+            "Band directionality index",
+            "MS -> HC peak frequency",
+            "Band statistics",
+        ),
+    )
+
+    subjects = sorted(subject_curves.keys(), key=natural_key)
+    if subjects:
+        ms_stack = np.stack([subject_curves[s][0] for s in subjects], axis=0)
+        hc_stack = np.stack([subject_curves[s][1] for s in subjects], axis=0)
+        _add_mean_sem_traces(
+            fig,
+            freq_ref,
+            ms_stack,
+            row=1,
+            col=1,
+            color="#d62728",
+            name="MS -> HC mean",
+            showlegend=True,
+        )
+        _add_mean_sem_traces(
+            fig,
+            freq_ref,
+            hc_stack,
+            row=2,
+            col=1,
+            color="#2ca02c",
+            name="HC -> MS mean",
+            showlegend=True,
+        )
+
+    if band_labels:
+        di_x: list[str] = []
+        di_y: list[float] = []
+        peak_x: list[str] = []
+        peak_y: list[float] = []
+        for band in band_labels:
+            di_vals = _finite_metric_values(rows, band, "di")
+            peak_vals = _finite_metric_values(rows, band, "ms_to_hc_peak_freq")
+            di_x.extend([band] * int(di_vals.size))
+            di_y.extend([float(v) for v in di_vals])
+            peak_x.extend([band] * int(peak_vals.size))
+            peak_y.extend([float(v) for v in peak_vals])
+        fig.add_trace(
+            go.Box(
+                x=di_x,
+                y=di_y,
+                name="DI",
+                marker={"color": "#d62728", "size": 5, "opacity": 0.72},
+                line={"color": "#d62728", "width": 1.8},
+                fillcolor="rgba(214,39,40,0.38)",
+                boxpoints="all",
+                jitter=0.22,
+                pointpos=0,
+                showlegend=False,
+                hovertemplate="band=%{x}<br>DI=%{y:.4g}<extra></extra>",
+            ),
+            row=3,
+            col=1,
+        )
+        fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=3, col=1)
+        fig.add_trace(
+            go.Box(
+                x=peak_x,
+                y=peak_y,
+                name="MS -> HC peak frequency",
+                marker={"color": "#1f77b4", "size": 5, "opacity": 0.72},
+                line={"color": "#1f77b4", "width": 1.8},
+                fillcolor="rgba(31,119,180,0.35)",
+                boxpoints="all",
+                jitter=0.22,
+                pointpos=0,
+                showlegend=False,
+                hovertemplate="band=%{x}<br>peak=%{y:.4g} Hz<extra></extra>",
+            ),
+            row=4,
+            col=1,
+        )
+
+    table_rows: list[list[str]] = []
+    for row in summary_rows:
+        table_rows.append(
+            [
+                str(row["band"]),
+                str(int(row["n_subjects"])),
+                str(int(row["n_sessions"])),
+                _format_stats_value(row["median_di"], ".3f"),
+                f"{_format_stats_value(row['iqr_low'], '.3f')}..{_format_stats_value(row['iqr_high'], '.3f')}",
+                _format_stats_value(row["p_di_gt_0"], ".3g"),
+                f"{int(row['n_di_positive'])}/{int(row['n_subjects'])}",
+                _format_stats_value(row["median_peak_freq"], ".1f"),
+            ]
+        )
+    fig.add_trace(
+        _plotly_table_trace(
+            [
+                "Band",
+                "N subj",
+                "N sess",
+                "Median DI",
+                "IQR DI",
+                "p DI>0",
+                "DI>0",
+                "Median peak Hz",
+            ],
+            table_rows,
+        ),
+        row=5,
+        col=1,
+    )
+
+    for r in (1, 2):
+        fig.update_xaxes(title_text="Frequency (Hz)", showgrid=True, zeroline=False, minor={"dtick": 10, "showgrid": True}, row=r, col=1)
+        fig.update_yaxes(title_text="gPDC", showgrid=True, zeroline=False, row=r, col=1)
+    fig.update_xaxes(categoryorder="array", categoryarray=band_labels, title_text="Band", row=3, col=1)
+    fig.update_yaxes(title_text="Subject-mean DI", showgrid=True, zeroline=False, row=3, col=1)
+    fig.update_xaxes(categoryorder="array", categoryarray=band_labels, title_text="Band", row=4, col=1)
+    fig.update_yaxes(title_text="Peak frequency (Hz)", showgrid=True, zeroline=False, row=4, col=1)
+    fig.update_layout(
+        template="plotly_white",
+        height=1320,
+        margin={"l": 82, "r": 28, "t": 78, "b": 44},
+        title={
+            "text": (
+                f"{run_name} | Granger statistics<br>"
+                "<sup>Session metrics are averaged within subject before inference. "
+                "Wilcoxon signed-rank tests are one-sided for DI &gt; 0.</sup>"
+            ),
+            "x": 0.01,
+        },
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
+        dragmode="pan",
+        hovermode="closest",
+        boxmode="group",
+    )
+    return fig
+
+
+def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any:
+    _require_plotly()
+    stats = _collect_phaselag_group_stats(mode_cells)
+    if stats is None:
+        raise ValueError("No plottable PhaseLag statistics.")
+
+    rows = stats["subject_band_rows"]
+    summary_rows = stats["summary_rows"]
+    subject_curves = stats["subject_curves"]
+    bands = [row["band"] for row in summary_rows]
+    n_curve_rows = len(bands)
+    total_rows = 2 + n_curve_rows + 1
+    specs = [[{"type": "xy"}] for _ in range(total_rows - 1)] + [[{"type": "table"}]]
+    row_heights = [0.15, 0.15] + [0.12 for _ in range(n_curve_rows)] + [0.2]
+    subplot_titles = (
+        ["Representative lag across subjects", "MS-leading window ratio"]
+        + [f"Mean normalized Rayleigh Z: {band}" for band in bands]
+        + ["Band statistics"]
+    )
+    fig = make_subplots(
+        rows=total_rows,
+        cols=1,
+        specs=specs,
+        row_heights=row_heights,
+        vertical_spacing=0.045,
+        subplot_titles=tuple(subplot_titles),
+    )
+
+    peak_x: list[str] = []
+    peak_y: list[float] = []
+    lead_x: list[str] = []
+    lead_y: list[float] = []
+    for band in bands:
+        peak_vals = _finite_metric_values(rows, band, "peak_lag_ms")
+        lead_vals = _finite_metric_values(rows, band, "ms_lead_ratio")
+        peak_x.extend([band] * int(peak_vals.size))
+        peak_y.extend([float(v) for v in peak_vals])
+        lead_x.extend([band] * int(lead_vals.size))
+        lead_y.extend([float(v) for v in lead_vals])
+
+    fig.add_trace(
+        go.Box(
+            x=peak_x,
+            y=peak_y,
+            name="peak lag",
+            marker={"color": "#d62728", "size": 5, "opacity": 0.72},
+            line={"color": "#d62728", "width": 1.8},
+            fillcolor="rgba(214,39,40,0.38)",
+            boxpoints="all",
+            jitter=0.22,
+            pointpos=0,
+            showlegend=False,
+            hovertemplate="band=%{x}<br>peak lag=%{y:.4g} ms<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=1, col=1)
+    fig.add_trace(
+        go.Box(
+            x=lead_x,
+            y=lead_y,
+            name="MS lead ratio",
+            marker={"color": "#1f77b4", "size": 5, "opacity": 0.72},
+            line={"color": "#1f77b4", "width": 1.8},
+            fillcolor="rgba(31,119,180,0.35)",
+            boxpoints="all",
+            jitter=0.22,
+            pointpos=0,
+            showlegend=False,
+            hovertemplate="band=%{x}<br>MS lead ratio=%{y:.4g}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_hline(y=0.5, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=2, col=1)
+
+    for bi, band in enumerate(bands):
+        plot_row = 3 + bi
+        curves = [
+            subject_curves[key]
+            for key in sorted(subject_curves.keys(), key=lambda k: (natural_key(k[0]), natural_key(k[1])))
+            if key[1] == band
+        ]
+        if curves:
+            lag_ref = np.asarray(curves[0][0], dtype=float)
+            stack = np.stack([np.asarray(c[1], dtype=float) for c in curves], axis=0)
+            _add_mean_sem_traces(
+                fig,
+                lag_ref,
+                stack,
+                row=plot_row,
+                col=1,
+                color=PLOTLY_COLORS[bi % len(PLOTLY_COLORS)],
+                name=band,
+                showlegend=False,
+            )
+        fig.add_vline(x=0.0, line={"color": "rgba(40,40,40,0.65)", "width": 1.0, "dash": "dot"}, row=plot_row, col=1)
+        fig.update_xaxes(title_text="Lag (ms)", showgrid=True, zeroline=False, row=plot_row, col=1)
+        fig.update_yaxes(title_text="Mean norm. Z", showgrid=True, zeroline=False, row=plot_row, col=1)
+
+    table_rows: list[list[str]] = []
+    for row in summary_rows:
+        table_rows.append(
+            [
+                str(row["band"]),
+                str(int(row["n_subjects"])),
+                str(int(row["n_sessions"])),
+                _format_stats_value(row["median_peak_lag_ms"], ".3g"),
+                f"{_format_stats_value(row['iqr_peak_lag_low'], '.3g')}..{_format_stats_value(row['iqr_peak_lag_high'], '.3g')}",
+                _format_stats_value(row["p_lag_gt_0"], ".3g"),
+                _format_stats_value(row["median_ms_lead_ratio"], ".2f"),
+                _format_stats_value(row["p_lead_ratio_gt_0_5"], ".3g"),
+                _format_stats_value(row["median_valid_ratio"], ".2f"),
+            ]
+        )
+    fig.add_trace(
+        _plotly_table_trace(
+            [
+                "Band",
+                "N subj",
+                "N sess",
+                "Median lag ms",
+                "IQR lag",
+                "p lag>0",
+                "Median MSlead",
+                "p MSlead>0.5",
+                "Valid ratio",
+            ],
+            table_rows,
+        ),
+        row=total_rows,
+        col=1,
+    )
+
+    for r in (1, 2):
+        fig.update_xaxes(categoryorder="array", categoryarray=bands, title_text="Band", showgrid=True, row=r, col=1)
+    fig.update_yaxes(title_text="Peak lag from mean normalized Rayleigh Z (ms)", showgrid=True, zeroline=False, row=1, col=1)
+    fig.update_yaxes(title_text="MS-leading window ratio", range=[-0.02, 1.02], showgrid=True, zeroline=False, row=2, col=1)
+    fig.update_layout(
+        template="plotly_white",
+        height=max(980, 300 + 225 * total_rows),
+        margin={"l": 96, "r": 28, "t": 82, "b": 44},
+        title={
+            "text": (
+                f"{run_name} | PhaseLag statistics<br>"
+                "<sup>Positive lag means MS leads HC. Session metrics are averaged within subject before inference.</sup>"
+            ),
+            "x": 0.01,
+        },
+        dragmode="pan",
+        hovermode="closest",
+        boxmode="group",
+    )
+    return fig
+
+
+def _build_syncfc_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any:
+    _require_plotly()
+    stats = _collect_syncfc_group_stats(mode_cells)
+    if stats is None:
+        raise ValueError("No plottable SyncFC statistics.")
+
+    rows = stats["subject_band_rows"]
+    summary_rows = stats["summary_rows"]
+    bands = [row["band"] for row in summary_rows]
+    fig = make_subplots(
+        rows=7,
+        cols=1,
+        specs=[
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+            [{"type": "table"}],
+        ],
+        row_heights=[0.14, 0.14, 0.13, 0.13, 0.13, 0.13, 0.2],
+        vertical_spacing=0.045,
+        subplot_titles=(
+            "Band-limited PLV: real vs permutation",
+            "Band-limited coherence: real vs permutation",
+            "Null-normalized PLV",
+            "Null-normalized coherence",
+            "PLV real-null mean comparison",
+            "Coherence real-null mean comparison",
+            "Band statistics",
+        ),
+    )
+
+    def add_real_null_boxes(plot_row: int, real_key: str, null_key: str, ylabel: str, color: str) -> None:
+        real_x: list[str] = []
+        real_y: list[float] = []
+        null_x: list[str] = []
+        null_y: list[float] = []
+        for band in bands:
+            real_vals = _finite_metric_values(rows, band, real_key)
+            null_vals = _finite_metric_values(rows, band, null_key)
+            real_x.extend([band] * int(real_vals.size))
+            real_y.extend([float(v) for v in real_vals])
+            null_x.extend([band] * int(null_vals.size))
+            null_y.extend([float(v) for v in null_vals])
+        fig.add_trace(
+            go.Box(
+                x=real_x,
+                y=real_y,
+                name=f"real {ylabel}",
+                legendgroup=f"real-{ylabel}",
+                marker={"color": color, "size": 5, "opacity": 0.7},
+                line={"color": color, "width": 1.8},
+                fillcolor=_hex_to_rgba(color, 0.38),
+                boxpoints="all",
+                jitter=0.18,
+                pointpos=0,
+                showlegend=(plot_row == 1),
+                hovertemplate="band=%{x}<br>real=%{y:.4g}<extra></extra>",
+            ),
+            row=plot_row,
+            col=1,
+        )
+        fig.add_trace(
+            go.Box(
+                x=null_x,
+                y=null_y,
+                name=f"permutation {ylabel}",
+                legendgroup=f"null-{ylabel}",
+                marker={"color": "rgba(100,100,100,0.55)", "size": 4, "opacity": 0.48},
+                line={"color": "rgba(90,90,90,0.95)", "width": 1.8},
+                fillcolor="rgba(145,145,145,0.35)",
+                boxpoints="all",
+                jitter=0.18,
+                pointpos=0,
+                showlegend=(plot_row == 1),
+                hovertemplate="band=%{x}<br>permutation=%{y:.4g}<extra></extra>",
+            ),
+            row=plot_row,
+            col=1,
+        )
+        fig.update_yaxes(title_text=ylabel, range=[-0.02, 1.02], showgrid=True, zeroline=False, row=plot_row, col=1)
+
+    add_real_null_boxes(1, "median_plv", "surrogate_mean_plv", "PLV", "#1f77b4")
+    add_real_null_boxes(2, "median_coh", "surrogate_mean_coh", "Coherence", "#d62728")
+
+    for plot_row, metric, ylabel, color in (
+        (3, "z_plv", "Zsync PLV", "#1f77b4"),
+        (4, "z_coh", "Zsync coherence", "#d62728"),
+    ):
+        x_vals: list[str] = []
+        y_vals: list[float] = []
+        for band in bands:
+            vals = _finite_metric_values(rows, band, metric)
+            x_vals.extend([band] * int(vals.size))
+            y_vals.extend([float(v) for v in vals])
+        fig.add_trace(
+            go.Box(
+                x=x_vals,
+                y=y_vals,
+                name=ylabel,
+                marker={"color": color, "size": 5, "opacity": 0.72},
+                line={"color": color, "width": 1.8},
+                fillcolor=_hex_to_rgba(color, 0.35),
+                boxpoints="all",
+                jitter=0.2,
+                pointpos=0,
+                showlegend=False,
+                hovertemplate="band=%{x}<br>%{y:.4g}<extra></extra>",
+            ),
+            row=plot_row,
+            col=1,
+        )
+        fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=plot_row, col=1)
+        fig.update_yaxes(title_text=ylabel, showgrid=True, zeroline=False, row=plot_row, col=1)
+
+    def add_real_null_bars(plot_row: int, real_key: str, null_key: str, ylabel: str, color: str) -> None:
+        real_means: list[float] = []
+        null_means: list[float] = []
+        real_sem: list[float] = []
+        null_sem: list[float] = []
+        for band in bands:
+            real = _finite_metric_values(rows, band, real_key)
+            null = _finite_metric_values(rows, band, null_key)
+            real_means.append(float(np.nanmean(real)) if real.size else np.nan)
+            null_means.append(float(np.nanmean(null)) if null.size else np.nan)
+            real_sem.append(float(np.nanstd(real, ddof=1) / np.sqrt(real.size)) if real.size > 1 else 0.0)
+            null_sem.append(float(np.nanstd(null, ddof=1) / np.sqrt(null.size)) if null.size > 1 else 0.0)
+        fig.add_trace(
+            go.Bar(
+                x=bands,
+                y=real_means,
+                name=f"real {ylabel}",
+                marker={"color": color, "opacity": 0.78},
+                error_y={"type": "data", "array": real_sem, "visible": True},
+                showlegend=False,
+                hovertemplate="band=%{x}<br>real mean=%{y:.4g}<extra></extra>",
+            ),
+            row=plot_row,
+            col=1,
+        )
+        fig.add_trace(
+            go.Bar(
+                x=bands,
+                y=null_means,
+                name=f"permutation {ylabel}",
+                marker={"color": "rgba(120,120,120,0.68)"},
+                error_y={"type": "data", "array": null_sem, "visible": True},
+                showlegend=False,
+                hovertemplate="band=%{x}<br>permutation mean=%{y:.4g}<extra></extra>",
+            ),
+            row=plot_row,
+            col=1,
+        )
+        fig.update_yaxes(title_text=ylabel, range=[-0.02, 1.02], showgrid=True, zeroline=False, row=plot_row, col=1)
+
+    add_real_null_bars(5, "median_plv", "surrogate_mean_plv", "PLV", "#1f77b4")
+    add_real_null_bars(6, "median_coh", "surrogate_mean_coh", "Coherence", "#d62728")
+
+    table_rows: list[list[str]] = []
+    for row in summary_rows:
+        table_rows.append(
+            [
+                str(row["band"]),
+                str(int(row["n_subjects"])),
+                str(int(row["n_sessions"])),
+                _format_stats_value(row["median_plv"], ".3f"),
+                _format_stats_value(row["median_z_plv"], ".3g"),
+                _format_stats_value(row["p_z_plv_gt_0"], ".3g"),
+                _format_stats_value(row["q_z_plv_gt_0"], ".3g"),
+                _format_stats_value(row["median_coh"], ".3f"),
+                _format_stats_value(row["median_z_coh"], ".3g"),
+                _format_stats_value(row["p_z_coh_gt_0"], ".3g"),
+                _format_stats_value(row["q_z_coh_gt_0"], ".3g"),
+            ]
+        )
+    fig.add_trace(
+        _plotly_table_trace(
+            [
+                "Band",
+                "N subj",
+                "N sess",
+                "Median PLV",
+                "Median Z PLV",
+                "p ZPLV>0",
+                "q ZPLV",
+                "Median Coh",
+                "Median Z Coh",
+                "p ZCoh>0",
+                "q ZCoh",
+            ],
+            table_rows,
+        ),
+        row=7,
+        col=1,
+    )
+
+    for r in range(1, 7):
+        fig.update_xaxes(categoryorder="array", categoryarray=bands, title_text="Band", showgrid=True, zeroline=False, row=r, col=1)
+    fig.update_layout(
+        template="plotly_white",
+        height=1650,
+        margin={"l": 86, "r": 28, "t": 82, "b": 44},
+        title={
+            "text": (
+                f"{run_name} | SyncFC statistics<br>"
+                "<sup>Real and permutation values are subject-level session averages. "
+                "Wilcoxon signed-rank tests are one-sided for Zsync &gt; 0.</sup>"
+            ),
+            "x": 0.01,
+        },
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
+        dragmode="pan",
+        hovermode="closest",
+        boxmode="group",
+        barmode="group",
+    )
+    return fig
 
 
 def _inject_reset_listener(html_text: str) -> str:
@@ -6147,6 +8769,193 @@ def _build_mode_index_html(
     const first = findFirstAvailable();
     if (first) go(first[0], first[1]);
     else metaEl.textContent = "No subject/mode pages found.";
+  </script>
+</body>
+</html>
+"""
+
+
+def _build_stats_index_html(stats_pages: list[StatsPage], run_name: str) -> str:
+    items = [
+        {
+            "key": p.key,
+            "title": p.title,
+            "href": p.href,
+        }
+        for p in stats_pages
+    ]
+    items_json = json.dumps(items, ensure_ascii=False)
+    run_name_json = json.dumps(run_name, ensure_ascii=False)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Group Statistics</title>
+  <style>
+    :root {{
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --line: #d9dde6;
+      --txt: #212734;
+      --muted: #5e6575;
+      --accent: #1f6feb;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      height: 100dvh;
+      overflow: hidden;
+      font-family: Calibri, "Segoe UI", Arial, sans-serif;
+      color: var(--txt);
+      background: var(--bg);
+    }}
+    .root {{
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100dvh;
+      min-height: 0;
+    }}
+    .top {{
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }}
+    .title {{
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    .subtitle {{
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }}
+    .tabs {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }}
+    .tab, .tool {{
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--txt);
+      border-radius: 7px;
+      min-height: 32px;
+      padding: 0 11px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    .tab:hover, .tool:hover {{ background: #f1f6ff; color: var(--accent); }}
+    .tab.active {{
+      background: #e8f2ff;
+      border-color: #b6d1ff;
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px rgba(31,111,235,0.2);
+    }}
+    .tools {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding-left: 6px;
+      border-left: 1px solid var(--line);
+    }}
+    .viewer {{
+      position: relative;
+      min-height: 0;
+      min-width: 0;
+      background: #fff;
+      overflow: hidden;
+    }}
+    iframe {{
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+    }}
+  </style>
+</head>
+<body>
+  <div class="root">
+    <header class="top">
+      <div class="title">
+        Group Statistics Browser
+        <span class="subtitle" id="runName"></span>
+      </div>
+      <div class="tabs" id="tabs"></div>
+    </header>
+    <main class="viewer">
+      <iframe id="frame" title="group-statistics-plot"></iframe>
+    </main>
+  </div>
+  <script>
+    const RUN_NAME = {run_name_json};
+    const pages = {items_json};
+    const tabsEl = document.getElementById("tabs");
+    const frameEl = document.getElementById("frame");
+    document.getElementById("runName").textContent = "Run: " + RUN_NAME;
+    let cur = 0;
+    function post(action) {{
+      try {{
+        frameEl.contentWindow.postMessage({{ type: "plotly-modebar-action", action }}, "*");
+      }} catch (err) {{}}
+    }}
+    function resetZoom() {{
+      try {{
+        frameEl.contentWindow.postMessage({{ type: "reset-plotly-view" }}, "*");
+      }} catch (err) {{}}
+    }}
+    function renderTabs() {{
+      tabsEl.innerHTML = "";
+      pages.forEach((p, idx) => {{
+        const b = document.createElement("button");
+        b.className = "tab" + (idx === cur ? " active" : "");
+        b.textContent = p.title;
+        b.title = p.title;
+        b.addEventListener("click", () => go(idx));
+        tabsEl.appendChild(b);
+      }});
+      const tools = document.createElement("span");
+      tools.className = "tools";
+      for (const item of [
+        {{ label: "Zoom", action: "zoom" }},
+        {{ label: "Pan", action: "pan" }},
+        {{ label: "Reset", action: "reset" }},
+      ]) {{
+        const b = document.createElement("button");
+        b.className = "tool";
+        b.textContent = item.label;
+        b.addEventListener("click", () => item.action === "reset" ? resetZoom() : post(item.action));
+        tools.appendChild(b);
+      }}
+      tabsEl.appendChild(tools);
+    }}
+    function go(idx) {{
+      if (!pages.length) return;
+      cur = (idx + pages.length) % pages.length;
+      frameEl.src = pages[cur].href;
+      renderTabs();
+    }}
+    document.addEventListener("keydown", (ev) => {{
+      if (ev.key === "ArrowLeft") {{ ev.preventDefault(); go(cur - 1); }}
+      else if (ev.key === "ArrowRight") {{ ev.preventDefault(); go(cur + 1); }}
+      else if (ev.key === "r" || ev.key === "R") {{ ev.preventDefault(); resetZoom(); }}
+    }});
+    if (pages.length) go(0);
   </script>
 </body>
 </html>
@@ -6880,6 +9689,8 @@ def _mode_axis_titles(
         return "Time (s)", "Amplitude (z-score)"
     if mode == "hilbert":
         return "Time (s)", "Hilbert Power (dB)" if apply_db else "Hilbert Power"
+    if mode == "spectrogram":
+        return "Time (s)", "Frequency (Hz)"
     if mode == "theta_power":
         return "Time (s)", "Power (dB)" if apply_db else "Power"
     if mode == "theta_delta_ratio":
@@ -6890,6 +9701,8 @@ def _mode_axis_titles(
         return "Time (s)", "Entropy TD Balance"
     if mode == "coherence_band":
         return "Time (s)", "Coh / PLV"
+    if mode == "syncfc":
+        return "Time (s)", "SyncFC Coh / PLV"
     if mode == "phaselag":
         return "Lag (ms)", "Rayleigh-Z lag distribution"
     if mode == "pearson":
@@ -6924,6 +9737,15 @@ def main_code(args: argparse.Namespace) -> None:
         raise ValueError("--phaselag_min_peak_delta_frac must be >= 0.")
     if float(args.phaselag_min_valid_ratio) < 0 or float(args.phaselag_min_valid_ratio) > 1:
         raise ValueError("--phaselag_min_valid_ratio must be between 0 and 1.")
+    if int(args.phaselag_edge_guard_bins) < 0:
+        raise ValueError("--phaselag_edge_guard_bins must be >= 0.")
+    if int(args.syncfc_n_surrogates) < 0:
+        raise ValueError("--syncfc_n_surrogates must be >= 0.")
+    syncfc_null = str(args.syncfc_null).strip().lower()
+    if syncfc_null not in {"window_shuffle", "circular_shift", "none"}:
+        raise ValueError("--syncfc_null must be one of: window_shuffle, circular_shift, none.")
+    if float(args.syncfc_min_shift_sec) < 0:
+        raise ValueError("--syncfc_min_shift_sec must be >= 0.")
     if (not np.isfinite(args.db_eps)) or float(args.db_eps) <= 0:
         raise ValueError("--db_eps must be a positive finite value.")
     if (
@@ -7139,6 +9961,14 @@ def main_code(args: argparse.Namespace) -> None:
         )
     else:
         print("-- PSD aperiodic mode: none")
+    if "spectrogram" in modes:
+        print(
+            "-- spectrogram frequency: "
+            f"plot={freq_plot_min_req:g}-{freq_plot_max_eff:g}Hz, "
+            f"calc={freq_calc_min_req:g}-{freq_calc_max_eff:g}Hz, "
+            f"normalize={args.spectrogram_normalize}, "
+            f"aperiodic={args.spectrogram_aperiodic_mode}"
+        )
     if "coherence" in modes:
         print(
             "-- coherence frequency: "
@@ -7324,6 +10154,31 @@ def main_code(args: argparse.Namespace) -> None:
         )
         mode_cells.update(theta_cells)
 
+    if "spectrogram" in modes:
+        assert ts_range is not None
+        mode_cells["spectrogram"] = _build_spectrogram_mode_cells(
+            eeg_entries=eeg_entries,
+            analysis_sampling_rate=analysis_sampling_rate,
+            spike_sampling_rate=float(args.sampling_rate),
+            time_range=ts_range,
+            tf_win_sec=float(args.tf_win_sec),
+            tf_step_sec=float(args.tf_step_sec),
+            max_points=int(args.interactive_max_points),
+            fmin_plot=float(freq_plot_min_req),
+            fmax_plot=float(freq_plot_max_eff),
+            fmin_calc=float(freq_calc_min_req),
+            fmax_calc=float(freq_calc_max_eff),
+            normalize=str(args.spectrogram_normalize),
+            aperiodic_mode=str(args.spectrogram_aperiodic_mode),
+            ms_lfp_sigma=float(ms_lfp_sigma),
+            ms_lfp_a=float(ms_lfp_a),
+            ms_lfp_a0=float(ms_lfp_a0),
+            ms_lfp_distance_map=ms_lfp_distance_map,
+            ms_lfp_d_default=float(ms_lfp_d_default),
+            ms_lfp_post_smooth_sec=float(ms_lfp_post_smooth_sec),
+            n_jobs=n_jobs,
+        )
+
     if "coherence_band" in modes:
         assert ts_range is not None
         mode_cells["coherence_band"] = _build_coherence_band_mode_cells(
@@ -7345,6 +10200,37 @@ def main_code(args: argparse.Namespace) -> None:
             n_jobs=n_jobs,
         )
 
+    if "syncfc" in modes:
+        print(
+            "-- SyncFC: "
+            f"null={syncfc_null}, "
+            f"n_null={int(args.syncfc_n_surrogates)}, "
+            f"min_shift_sec={float(args.syncfc_min_shift_sec):g}"
+        )
+        assert ts_range is not None
+        mode_cells["syncfc"] = _build_syncfc_mode_cells(
+            eeg_entries=eeg_entries,
+            analysis_sampling_rate=analysis_sampling_rate,
+            spike_sampling_rate=float(args.sampling_rate),
+            theta_bands=theta_bands,
+            time_range=ts_range,
+            tf_win_sec=float(args.tf_win_sec),
+            tf_step_sec=float(args.tf_step_sec),
+            max_points=int(args.interactive_max_points),
+            smooth_win_sec=smooth_win_sec,
+            ms_lfp_sigma=float(ms_lfp_sigma),
+            ms_lfp_a=float(ms_lfp_a),
+            ms_lfp_a0=float(ms_lfp_a0),
+            ms_lfp_distance_map=ms_lfp_distance_map,
+            ms_lfp_d_default=float(ms_lfp_d_default),
+            ms_lfp_post_smooth_sec=float(ms_lfp_post_smooth_sec),
+            syncfc_n_surrogates=int(args.syncfc_n_surrogates),
+            syncfc_null=syncfc_null,
+            syncfc_min_shift_sec=float(args.syncfc_min_shift_sec),
+            syncfc_seed=int(args.syncfc_seed),
+            n_jobs=n_jobs,
+        )
+
     if "phaselag" in modes:
         print(
             "-- PhaseLag filters: "
@@ -7353,6 +10239,8 @@ def main_code(args: argparse.Namespace) -> None:
             f"min_peak_delta_z={float(args.phaselag_min_peak_delta_z):g}, "
             f"min_peak_delta_frac={float(args.phaselag_min_peak_delta_frac):g}, "
             f"min_valid_ratio={float(args.phaselag_min_valid_ratio):g}, "
+            f"exclude_edge_peaks={not bool(args.phaselag_include_edge_peaks)}, "
+            f"edge_guard_bins={int(args.phaselag_edge_guard_bins)}, "
             "score=rayleigh_z"
         )
         assert ts_range is not None
@@ -7375,6 +10263,8 @@ def main_code(args: argparse.Namespace) -> None:
             phaselag_min_peak_delta_z=float(args.phaselag_min_peak_delta_z),
             phaselag_min_peak_delta_frac=float(args.phaselag_min_peak_delta_frac),
             phaselag_min_valid_ratio=float(args.phaselag_min_valid_ratio),
+            phaselag_exclude_edge_peaks=(not bool(args.phaselag_include_edge_peaks)),
+            phaselag_edge_guard_bins=int(args.phaselag_edge_guard_bins),
             n_jobs=n_jobs,
         )
 
@@ -7501,6 +10391,13 @@ def main_code(args: argparse.Namespace) -> None:
                         x_title=x_title,
                         y_title=y_title,
                     )
+                elif mode == "spectrogram":
+                    fig = _build_subject_spectrogram_figure(
+                        subject=subject,
+                        mode_cells=subject_cells,
+                        x_title=x_title,
+                        y_title=y_title,
+                    )
                 elif mode == "granger":
                     fig = _build_subject_granger_figure(
                         subject=subject,
@@ -7510,6 +10407,11 @@ def main_code(args: argparse.Namespace) -> None:
                     )
                 elif mode == "phaselag":
                     fig = _build_subject_phaselag_figure(
+                        subject=subject,
+                        mode_cells=subject_cells,
+                    )
+                elif mode == "syncfc":
+                    fig = _build_subject_syncfc_figure(
                         subject=subject,
                         mode_cells=subject_cells,
                     )
@@ -7587,6 +10489,86 @@ def main_code(args: argparse.Namespace) -> None:
                 )
             except Exception as exc:
                 print(f"\033[1;33m -- PhaseLag stats PDF skipped: {exc}\033[0m")
+
+    if "syncfc" in modes and mode_cells.get("syncfc"):
+        raw_stats_pdf = str(args.syncfc_stats_pdf).strip()
+        if raw_stats_pdf.lower() not in {"", "none", "false", "off", "0"}:
+            if raw_stats_pdf.upper() == "AUTO":
+                syncfc_stats_pdf = output_html.parent / f"syncfc_stats_{sanitize_token(dataset_dir.name)}.pdf"
+            else:
+                syncfc_stats_pdf = Path(raw_stats_pdf).expanduser().resolve()
+            try:
+                _write_syncfc_stats_pdf(
+                    mode_cells=mode_cells["syncfc"],
+                    out_path=syncfc_stats_pdf,
+                    run_name=dataset_dir.name,
+                )
+            except Exception as exc:
+                print(f"\033[1;33m -- SyncFC stats PDF skipped: {exc}\033[0m")
+
+    raw_stats_html = str(getattr(args, "stats_html", "AUTO")).strip()
+    if raw_stats_html.lower() not in {"", "none", "false", "off", "0"}:
+        if raw_stats_html.upper() == "AUTO":
+            stats_html = output_html.parent / f"stats_summary_{sanitize_token(dataset_dir.name)}.html"
+        else:
+            stats_html = Path(raw_stats_html).expanduser().resolve()
+        stats_pages_dir = stats_html.parent / f"stats_summary_pages_{sanitize_token(dataset_dir.name)}"
+        stats_pages: list[StatsPage] = []
+
+        def add_stats_page(key: str, title: str, fig: Any) -> None:
+            child_path = stats_pages_dir / f"{sanitize_token(key)}.html"
+            write_plotly_html(fig, out_path=child_path, include_plotlyjs=include_plotlyjs)
+            rel = child_path.relative_to(stats_html.parent).as_posix()
+            stats_pages.append(StatsPage(key=key, title=title, href=rel))
+            print(f"-- saved stats page: {title} -> {child_path}")
+
+        if "granger" in modes and mode_cells.get("granger"):
+            try:
+                add_stats_page(
+                    "granger",
+                    "Granger",
+                    _build_granger_stats_figure(
+                        mode_cells=mode_cells["granger"],
+                        bands=granger_stats_bands,
+                        run_name=dataset_dir.name,
+                    ),
+                )
+            except Exception as exc:
+                print(f"\033[1;33m -- Granger stats HTML skipped: {exc}\033[0m")
+        if "phaselag" in modes and mode_cells.get("phaselag"):
+            try:
+                add_stats_page(
+                    "phaselag",
+                    "PhaseLag",
+                    _build_phaselag_stats_figure(
+                        mode_cells=mode_cells["phaselag"],
+                        run_name=dataset_dir.name,
+                    ),
+                )
+            except Exception as exc:
+                print(f"\033[1;33m -- PhaseLag stats HTML skipped: {exc}\033[0m")
+        if "syncfc" in modes and mode_cells.get("syncfc"):
+            try:
+                add_stats_page(
+                    "syncfc",
+                    "SyncFC",
+                    _build_syncfc_stats_figure(
+                        mode_cells=mode_cells["syncfc"],
+                        run_name=dataset_dir.name,
+                    ),
+                )
+            except Exception as exc:
+                print(f"\033[1;33m -- SyncFC stats HTML skipped: {exc}\033[0m")
+
+        if stats_pages:
+            stats_html.parent.mkdir(parents=True, exist_ok=True)
+            stats_html.write_text(
+                _build_stats_index_html(stats_pages=stats_pages, run_name=dataset_dir.name),
+                encoding="utf-8",
+            )
+            print(f"-- saved group stats HTML: {stats_html}")
+        else:
+            print("\033[1;33m -- group stats HTML skipped: no plottable stats pages.\033[0m")
 
     if not mode_pages:
         print("\033[1;31m -- no mode pages generated; parent HTML not written.\033[0m")
