@@ -726,7 +726,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         type=float,
         metavar=("FMIN", "FMAX"),
-        default=[1.5, 10.0],
+        default=[1, 30.0],
         help=(
             "Frequency range [Hz] displayed/aggregated in spectrogram/coherence modes "
             "(wavelet power/coherence/PLV). Default: 1.5 10."
@@ -737,7 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         type=float,
         metavar=("FMIN", "FMAX"),
-        default=[1.0, 15.0],
+        default=[1.0, 32.0],
         help=(
             "Wavelet frequency calculation range [Hz] for spectrogram/coherence modes. "
             "Default: 1 15."
@@ -6398,6 +6398,17 @@ def _wilcoxon_greater_p(values: np.ndarray) -> float:
         return float("nan")
 
 
+def _wilcoxon_two_sided_p(values: np.ndarray) -> float:
+    vals = np.asarray(values, dtype=float).reshape(-1)
+    vals = vals[np.isfinite(vals)]
+    if vals.size < 2 or np.allclose(vals, 0.0):
+        return float("nan")
+    try:
+        return float(wilcoxon(vals, alternative="two-sided", zero_method="wilcox").pvalue)
+    except ValueError:
+        return float("nan")
+
+
 def _bh_fdr(p_values: list[float]) -> list[float]:
     p = np.asarray(p_values, dtype=float).reshape(-1)
     q = np.full(p.size, np.nan, dtype=float)
@@ -6509,6 +6520,8 @@ def _add_mean_sem_traces(
     name: str,
     show_subjects: bool = True,
     showlegend: bool = True,
+    subject_alpha: float = 0.28,
+    subject_width: float = 0.85,
 ) -> None:
     xx = np.asarray(x, dtype=float).reshape(-1)
     arr = np.asarray(stack, dtype=float)
@@ -6521,7 +6534,7 @@ def _add_mean_sem_traces(
                     x=xx,
                     y=curve,
                     mode="lines",
-                    line={"color": "rgba(130,130,130,0.38)", "width": 0.8},
+                    line={"color": _hex_to_rgba(color, float(subject_alpha)), "width": float(subject_width)},
                     hoverinfo="skip",
                     showlegend=False,
                 ),
@@ -6681,7 +6694,7 @@ def _collect_granger_group_stats(
         if di_vals.size == 0:
             continue
         q1, med, q3 = np.percentile(di_vals, [25, 50, 75])
-        p_greater = _wilcoxon_greater_p(di_vals)
+        p_two_sided = _wilcoxon_two_sided_p(di_vals)
         summary_rows.append(
             {
                 "band": band_label,
@@ -6690,7 +6703,7 @@ def _collect_granger_group_stats(
                 "median_di": float(med),
                 "iqr_low": float(q1),
                 "iqr_high": float(q3),
-                "p_di_gt_0": p_greater,
+                "p_di_ne_0": p_two_sided,
                 "n_di_positive": int(np.sum(di_vals > 0)),
                 "median_peak_freq": float(np.nanmedian(peak_vals)) if peak_vals.size else float("nan"),
             }
@@ -6783,7 +6796,7 @@ def _write_granger_stats_pdf(
                 ax.scatter(x, vals, s=28, color="#d62728", alpha=0.75, edgecolor="white", linewidth=0.4)
             p_txt = []
             for row in summary_rows:
-                p = float(row["p_di_gt_0"])
+                p = float(row["p_di_ne_0"])
                 if np.isfinite(p):
                     p_txt.append(f"{row['band']}: p={p:.3g}")
             ax.set_title("Band directionality index across subjects\nDI=(MS->HC - HC->MS)/(MS->HC + HC->MS)")
@@ -6792,7 +6805,7 @@ def _write_granger_stats_pdf(
             ax.text(
                 0.01,
                 0.99,
-                "Wilcoxon signed-rank, one-sided DI > 0\n" + "\n".join(p_txt),
+                "Wilcoxon signed-rank, two-sided DI != 0\n" + "\n".join(p_txt),
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
@@ -6830,7 +6843,7 @@ def _write_granger_stats_pdf(
 
             table_rows = []
             for row in summary_rows:
-                p = float(row["p_di_gt_0"])
+                p = float(row["p_di_ne_0"])
                 table_rows.append(
                     [
                         row["band"],
@@ -6859,7 +6872,7 @@ def _write_granger_stats_pdf(
                     "N sess",
                     "Median DI",
                     "IQR DI",
-                    "p DI>0",
+                    "p DI!=0",
                     "DI>0",
                     "Median peak Hz",
                 ],
@@ -7615,14 +7628,13 @@ def _build_granger_stats_figure(
     band_labels = [row["band"] for row in summary_rows]
 
     fig = make_subplots(
-        rows=5,
+        rows=4,
         cols=1,
-        specs=[[{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "table"}]],
-        row_heights=[0.21, 0.21, 0.18, 0.18, 0.22],
+        specs=[[{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "table"}]],
+        row_heights=[0.36, 0.21, 0.21, 0.22],
         vertical_spacing=0.06,
         subplot_titles=(
-            "MS -> HC subject-averaged gPDC",
-            "HC -> MS subject-averaged gPDC",
+            "Subject-averaged gPDC",
             "Band directionality index",
             "MS -> HC peak frequency",
             "Band statistics",
@@ -7642,16 +7654,18 @@ def _build_granger_stats_figure(
             color="#d62728",
             name="MS -> HC mean",
             showlegend=True,
+            subject_alpha=0.24,
         )
         _add_mean_sem_traces(
             fig,
             freq_ref,
             hc_stack,
-            row=2,
+            row=1,
             col=1,
             color="#2ca02c",
             name="HC -> MS mean",
             showlegend=True,
+            subject_alpha=0.24,
         )
 
     if band_labels:
@@ -7677,13 +7691,14 @@ def _build_granger_stats_figure(
                 boxpoints="all",
                 jitter=0.22,
                 pointpos=0,
+                width=0.58,
                 showlegend=False,
                 hovertemplate="band=%{x}<br>DI=%{y:.4g}<extra></extra>",
             ),
-            row=3,
+            row=2,
             col=1,
         )
-        fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=3, col=1)
+        fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=2, col=1)
         fig.add_trace(
             go.Box(
                 x=peak_x,
@@ -7695,10 +7710,11 @@ def _build_granger_stats_figure(
                 boxpoints="all",
                 jitter=0.22,
                 pointpos=0,
+                width=0.58,
                 showlegend=False,
                 hovertemplate="band=%{x}<br>peak=%{y:.4g} Hz<extra></extra>",
             ),
-            row=4,
+            row=3,
             col=1,
         )
 
@@ -7711,7 +7727,7 @@ def _build_granger_stats_figure(
                 str(int(row["n_sessions"])),
                 _format_stats_value(row["median_di"], ".3f"),
                 f"{_format_stats_value(row['iqr_low'], '.3f')}..{_format_stats_value(row['iqr_high'], '.3f')}",
-                _format_stats_value(row["p_di_gt_0"], ".3g"),
+                _format_stats_value(row["p_di_ne_0"], ".3g"),
                 f"{int(row['n_di_positive'])}/{int(row['n_subjects'])}",
                 _format_stats_value(row["median_peak_freq"], ".1f"),
             ]
@@ -7724,39 +7740,38 @@ def _build_granger_stats_figure(
                 "N sess",
                 "Median DI",
                 "IQR DI",
-                "p DI>0",
+                "p DI!=0",
                 "DI>0",
                 "Median peak Hz",
             ],
             table_rows,
         ),
-        row=5,
+        row=4,
         col=1,
     )
 
-    for r in (1, 2):
-        fig.update_xaxes(title_text="Frequency (Hz)", showgrid=True, zeroline=False, minor={"dtick": 10, "showgrid": True}, row=r, col=1)
-        fig.update_yaxes(title_text="gPDC", showgrid=True, zeroline=False, row=r, col=1)
+    fig.update_xaxes(title_text="Frequency (Hz)", showgrid=True, zeroline=False, minor={"dtick": 10, "showgrid": True}, row=1, col=1)
+    fig.update_yaxes(title_text="gPDC", showgrid=True, zeroline=False, row=1, col=1)
+    fig.update_xaxes(categoryorder="array", categoryarray=band_labels, title_text="Band", row=2, col=1)
+    fig.update_yaxes(title_text="Subject-mean DI", showgrid=True, zeroline=False, row=2, col=1)
     fig.update_xaxes(categoryorder="array", categoryarray=band_labels, title_text="Band", row=3, col=1)
-    fig.update_yaxes(title_text="Subject-mean DI", showgrid=True, zeroline=False, row=3, col=1)
-    fig.update_xaxes(categoryorder="array", categoryarray=band_labels, title_text="Band", row=4, col=1)
-    fig.update_yaxes(title_text="Peak frequency (Hz)", showgrid=True, zeroline=False, row=4, col=1)
+    fig.update_yaxes(title_text="Peak frequency (Hz)", showgrid=True, zeroline=False, row=3, col=1)
     fig.update_layout(
         template="plotly_white",
-        height=1320,
+        height=1550,
         margin={"l": 82, "r": 28, "t": 78, "b": 44},
         title={
             "text": (
                 f"{run_name} | Granger statistics<br>"
                 "<sup>Session metrics are averaged within subject before inference. "
-                "Wilcoxon signed-rank tests are one-sided for DI &gt; 0.</sup>"
+                "Wilcoxon signed-rank tests are two-sided for DI != 0.</sup>"
             ),
             "x": 0.01,
         },
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
         dragmode="pan",
         hovermode="closest",
-        boxmode="group",
+        boxmode="overlay",
     )
     return fig
 
@@ -7771,14 +7786,14 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
     summary_rows = stats["summary_rows"]
     subject_curves = stats["subject_curves"]
     bands = [row["band"] for row in summary_rows]
-    n_curve_rows = len(bands)
-    total_rows = 2 + n_curve_rows + 1
-    specs = [[{"type": "xy"}] for _ in range(total_rows - 1)] + [[{"type": "table"}]]
-    row_heights = [0.15, 0.15] + [0.12 for _ in range(n_curve_rows)] + [0.2]
+    total_rows = 4
+    specs = [[{"type": "xy"}], [{"type": "xy"}], [{"type": "xy"}], [{"type": "table"}]]
+    row_heights = [0.22, 0.22, 0.34, 0.22]
     subplot_titles = (
-        ["Representative lag across subjects", "MS-leading window ratio"]
-        + [f"Mean normalized Rayleigh Z: {band}" for band in bands]
-        + ["Band statistics"]
+        "Representative lag across subjects",
+        "MS-leading window ratio",
+        "Mean normalized Rayleigh Z by lag",
+        "Band statistics",
     )
     fig = make_subplots(
         rows=total_rows,
@@ -7812,6 +7827,7 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
             boxpoints="all",
             jitter=0.22,
             pointpos=0,
+            width=0.58,
             showlegend=False,
             hovertemplate="band=%{x}<br>peak lag=%{y:.4g} ms<extra></extra>",
         ),
@@ -7830,6 +7846,7 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
             boxpoints="all",
             jitter=0.22,
             pointpos=0,
+            width=0.58,
             showlegend=False,
             hovertemplate="band=%{x}<br>MS lead ratio=%{y:.4g}<extra></extra>",
         ),
@@ -7839,7 +7856,6 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
     fig.add_hline(y=0.5, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=2, col=1)
 
     for bi, band in enumerate(bands):
-        plot_row = 3 + bi
         curves = [
             subject_curves[key]
             for key in sorted(subject_curves.keys(), key=lambda k: (natural_key(k[0]), natural_key(k[1])))
@@ -7852,15 +7868,16 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
                 fig,
                 lag_ref,
                 stack,
-                row=plot_row,
+                row=3,
                 col=1,
                 color=PLOTLY_COLORS[bi % len(PLOTLY_COLORS)],
                 name=band,
-                showlegend=False,
+                showlegend=True,
+                subject_alpha=0.22,
             )
-        fig.add_vline(x=0.0, line={"color": "rgba(40,40,40,0.65)", "width": 1.0, "dash": "dot"}, row=plot_row, col=1)
-        fig.update_xaxes(title_text="Lag (ms)", showgrid=True, zeroline=False, row=plot_row, col=1)
-        fig.update_yaxes(title_text="Mean norm. Z", showgrid=True, zeroline=False, row=plot_row, col=1)
+    fig.add_vline(x=0.0, line={"color": "rgba(40,40,40,0.65)", "width": 1.0, "dash": "dot"}, row=3, col=1)
+    fig.update_xaxes(title_text="Lag (ms)", showgrid=True, zeroline=False, row=3, col=1)
+    fig.update_yaxes(title_text="Mean norm. Z", showgrid=True, zeroline=False, row=3, col=1)
 
     table_rows: list[list[str]] = []
     for row in summary_rows:
@@ -7892,7 +7909,7 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
             ],
             table_rows,
         ),
-        row=total_rows,
+        row=4,
         col=1,
     )
 
@@ -7902,7 +7919,7 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
     fig.update_yaxes(title_text="MS-leading window ratio", range=[-0.02, 1.02], showgrid=True, zeroline=False, row=2, col=1)
     fig.update_layout(
         template="plotly_white",
-        height=max(980, 300 + 225 * total_rows),
+        height=1500,
         margin={"l": 96, "r": 28, "t": 82, "b": 44},
         title={
             "text": (
@@ -7911,9 +7928,10 @@ def _build_phaselag_stats_figure(mode_cells: list[ModeCell], run_name: str) -> A
             ),
             "x": 0.01,
         },
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
         dragmode="pan",
         hovermode="closest",
-        boxmode="group",
+        boxmode="overlay",
     )
     return fig
 
@@ -7966,36 +7984,38 @@ def _build_syncfc_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any
             null_y.extend([float(v) for v in null_vals])
         fig.add_trace(
             go.Box(
-                x=real_x,
-                y=real_y,
-                name=f"real {ylabel}",
-                legendgroup=f"real-{ylabel}",
-                marker={"color": color, "size": 5, "opacity": 0.7},
-                line={"color": color, "width": 1.8},
-                fillcolor=_hex_to_rgba(color, 0.38),
+                x=null_x,
+                y=null_y,
+                name=f"permutation {ylabel}",
+                legendgroup=f"null-{ylabel}",
+                marker={"color": "rgba(100,100,100,0.35)", "size": 4, "opacity": 0.28},
+                line={"color": "rgba(90,90,90,0.95)", "width": 1.6},
+                fillcolor="rgba(145,145,145,0.28)",
                 boxpoints="all",
-                jitter=0.18,
+                jitter=0.11,
                 pointpos=0,
+                width=0.72,
                 showlegend=(plot_row == 1),
-                hovertemplate="band=%{x}<br>real=%{y:.4g}<extra></extra>",
+                hovertemplate="band=%{x}<br>permutation=%{y:.4g}<extra></extra>",
             ),
             row=plot_row,
             col=1,
         )
         fig.add_trace(
             go.Box(
-                x=null_x,
-                y=null_y,
-                name=f"permutation {ylabel}",
-                legendgroup=f"null-{ylabel}",
-                marker={"color": "rgba(100,100,100,0.55)", "size": 4, "opacity": 0.48},
-                line={"color": "rgba(90,90,90,0.95)", "width": 1.8},
-                fillcolor="rgba(145,145,145,0.35)",
+                x=real_x,
+                y=real_y,
+                name=f"real {ylabel}",
+                legendgroup=f"real-{ylabel}",
+                marker={"color": color, "size": 5, "opacity": 0.7},
+                line={"color": color, "width": 1.9},
+                fillcolor=_hex_to_rgba(color, 0.42),
                 boxpoints="all",
-                jitter=0.18,
+                jitter=0.16,
                 pointpos=0,
+                width=0.48,
                 showlegend=(plot_row == 1),
-                hovertemplate="band=%{x}<br>permutation=%{y:.4g}<extra></extra>",
+                hovertemplate="band=%{x}<br>real=%{y:.4g}<extra></extra>",
             ),
             row=plot_row,
             col=1,
@@ -8035,48 +8055,62 @@ def _build_syncfc_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any
         fig.add_hline(y=0.0, line={"color": "rgba(40,40,40,0.75)", "width": 1.0}, row=plot_row, col=1)
         fig.update_yaxes(title_text=ylabel, showgrid=True, zeroline=False, row=plot_row, col=1)
 
-    def add_real_null_bars(plot_row: int, real_key: str, null_key: str, ylabel: str, color: str) -> None:
-        real_means: list[float] = []
-        null_means: list[float] = []
-        real_sem: list[float] = []
-        null_sem: list[float] = []
+    def add_real_null_summary_boxes(plot_row: int, real_key: str, null_key: str, ylabel: str, color: str) -> None:
+        real_x: list[str] = []
+        real_y: list[float] = []
+        null_x: list[str] = []
+        null_y: list[float] = []
         for band in bands:
             real = _finite_metric_values(rows, band, real_key)
             null = _finite_metric_values(rows, band, null_key)
-            real_means.append(float(np.nanmean(real)) if real.size else np.nan)
-            null_means.append(float(np.nanmean(null)) if null.size else np.nan)
-            real_sem.append(float(np.nanstd(real, ddof=1) / np.sqrt(real.size)) if real.size > 1 else 0.0)
-            null_sem.append(float(np.nanstd(null, ddof=1) / np.sqrt(null.size)) if null.size > 1 else 0.0)
+            real_x.extend([band] * int(real.size))
+            real_y.extend([float(v) for v in real])
+            null_x.extend([band] * int(null.size))
+            null_y.extend([float(v) for v in null])
         fig.add_trace(
-            go.Bar(
-                x=bands,
-                y=real_means,
-                name=f"real {ylabel}",
-                marker={"color": color, "opacity": 0.78},
-                error_y={"type": "data", "array": real_sem, "visible": True},
+            go.Box(
+                x=null_x,
+                y=null_y,
+                name=f"permutation {ylabel}",
+                legendgroup=f"summary-null-{ylabel}",
+                marker={"color": "rgba(100,100,100,0.35)", "size": 4, "opacity": 0.28},
+                line={"color": "rgba(90,90,90,0.95)", "width": 1.6},
+                fillcolor="rgba(145,145,145,0.28)",
+                boxmean=True,
+                boxpoints="all",
+                jitter=0.11,
+                pointpos=0,
+                width=0.72,
                 showlegend=False,
-                hovertemplate="band=%{x}<br>real mean=%{y:.4g}<extra></extra>",
+                hovertemplate="band=%{x}<br>permutation=%{y:.4g}<extra></extra>",
             ),
             row=plot_row,
             col=1,
         )
         fig.add_trace(
-            go.Bar(
-                x=bands,
-                y=null_means,
-                name=f"permutation {ylabel}",
-                marker={"color": "rgba(120,120,120,0.68)"},
-                error_y={"type": "data", "array": null_sem, "visible": True},
+            go.Box(
+                x=real_x,
+                y=real_y,
+                name=f"real {ylabel}",
+                legendgroup=f"summary-real-{ylabel}",
+                marker={"color": color, "size": 5, "opacity": 0.7},
+                line={"color": color, "width": 1.9},
+                fillcolor=_hex_to_rgba(color, 0.42),
+                boxmean=True,
+                boxpoints="all",
+                jitter=0.16,
+                pointpos=0,
+                width=0.48,
                 showlegend=False,
-                hovertemplate="band=%{x}<br>permutation mean=%{y:.4g}<extra></extra>",
+                hovertemplate="band=%{x}<br>real=%{y:.4g}<extra></extra>",
             ),
             row=plot_row,
             col=1,
         )
         fig.update_yaxes(title_text=ylabel, range=[-0.02, 1.02], showgrid=True, zeroline=False, row=plot_row, col=1)
 
-    add_real_null_bars(5, "median_plv", "surrogate_mean_plv", "PLV", "#1f77b4")
-    add_real_null_bars(6, "median_coh", "surrogate_mean_coh", "Coherence", "#d62728")
+    add_real_null_summary_boxes(5, "median_plv", "surrogate_mean_plv", "PLV", "#1f77b4")
+    add_real_null_summary_boxes(6, "median_coh", "surrogate_mean_coh", "Coherence", "#d62728")
 
     table_rows: list[list[str]] = []
     for row in summary_rows:
@@ -8120,7 +8154,7 @@ def _build_syncfc_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any
         fig.update_xaxes(categoryorder="array", categoryarray=bands, title_text="Band", showgrid=True, zeroline=False, row=r, col=1)
     fig.update_layout(
         template="plotly_white",
-        height=1650,
+        height=2200,
         margin={"l": 86, "r": 28, "t": 82, "b": 44},
         title={
             "text": (
@@ -8133,8 +8167,7 @@ def _build_syncfc_stats_figure(mode_cells: list[ModeCell], run_name: str) -> Any
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.01, "xanchor": "left", "x": 0.0},
         dragmode="pan",
         hovermode="closest",
-        boxmode="group",
-        barmode="group",
+        boxmode="overlay",
     )
     return fig
 
